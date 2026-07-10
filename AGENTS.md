@@ -49,8 +49,12 @@ Target platform: Linux shell.
 **Sprint 0 – Foundation** ✅ complete  
 Skeleton, cobra CLI, Makefile, `go build` + `fsearch --help` work.
 
-**Next: Sprint 1 – Core Search Engine**  
-Concurrent walker, content matching with line numbers, basic ignore + extension filtering, unit tests.
+**Sprint 1 – Core Search Engine** ✅ complete  
+Concurrent walker, content matching with line numbers, basic ignore + extension filtering, unit tests.  
+End-to-end: `./bin/fsearch "TODO" . --ext go,md`
+
+**Next: Sprint 2 – CLI Experience & Output**  
+Full flags (--context, --case-sensitive, …), colored output (fatih/color), pretty formatting.
 
 ## Future Notes
 - Performance is important (should feel snappy on large codebases)

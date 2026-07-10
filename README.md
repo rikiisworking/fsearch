@@ -4,7 +4,7 @@ Fast recursive file content search for the Linux shell.
 
 Modern, concurrent alternative to classic `grep` / `find` combos.
 
-> **Status:** Sprint 0 foundation. Search engine lands in Sprint 1.
+> **Status:** Sprint 1 — core search works. Color/pretty output lands in Sprint 2.
 
 ## Requirements
 
@@ -32,9 +32,22 @@ go install ./cmd/fsearch
 ```bash
 fsearch --help
 
-# Coming soon (Sprint 1+):
-# ./bin/fsearch "TODO" . --ext go,md
+# Search for a keyword under the current directory
+./bin/fsearch "TODO" .
+
+# Only Go and Markdown files
+./bin/fsearch "TODO" . --ext go,md
+
+# Extra basename ignores (repeatable)
+./bin/fsearch "FIXME" ./internal --ignore vendor --ignore '*.min.js'
 ```
+
+Output is grep-style: `path:line:content`
+
+| Flag | Meaning |
+|------|---------|
+| `--ext go,md` | only these extensions (empty = all) |
+| `--ignore PAT` | skip basenames matching PAT (exact or glob; repeatable) |
 
 ## Develop
 

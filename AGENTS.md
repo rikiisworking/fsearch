@@ -46,8 +46,11 @@ Target platform: Linux shell.
 - Early returns
 
 ## Current Focus (update this regularly)
-**Sprint 0 – Foundation**  
-Create clean project skeleton, cobra CLI, Makefile, basic structure so that `go build` and `fsearch --help` work.
+**Sprint 0 – Foundation** ✅ complete  
+Skeleton, cobra CLI, Makefile, `go build` + `fsearch --help` work.
+
+**Next: Sprint 1 – Core Search Engine**  
+Concurrent walker, content matching with line numbers, basic ignore + extension filtering, unit tests.
 
 ## Future Notes
 - Performance is important (should feel snappy on large codebases)

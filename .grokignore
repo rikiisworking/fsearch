@@ -1,0 +1,51 @@
+# Grok Build ignore file - optimized for Go projects
+
+# Build artifacts and binaries
+*.exe
+*.test
+*.out
+fsearch
+bin/
+dist/
+build/
+
+# Go modules and dependencies
+vendor/
+go.sum
+go.work
+go.work.sum
+
+# IDE / Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Test coverage and temporary files
+*.coverprofile
+*.prof
+coverage.txt
+testdata/
+
+# Logs and runtime data
+*.log
+*.tmp
+
+# Large directories that don't need to be in context
+node_modules/          # even if mixed repo
+.env
+.env.local
+*.pprof
+
+# Grok Build specific (optional)
+.grok/
+sessions/
+*.session
+
+# Optional: ignore large generated files or caches
+/pkg/mod/

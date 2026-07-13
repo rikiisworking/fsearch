@@ -99,9 +99,13 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer) e
 	})
 
 	// Consumer: single writer to stdout (no mutex needed).
+	printer := &output.Printer{
+		Keyword:    opts.Keyword,
+		IgnoreCase: opts.IgnoreCase,
+	}
 	g.Go(func() error {
 		for m := range results {
-			if err := output.WriteMatch(stdout, m); err != nil {
+			if err := printer.WriteMatch(stdout, m); err != nil {
 				return err
 			}
 		}

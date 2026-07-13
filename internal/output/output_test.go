@@ -24,7 +24,7 @@ func TestWriteMatchNoContext(t *testing.T) {
 }
 
 func TestPrinterContext(t *testing.T) {
-	p := &Printer{}
+	p := &Printer{NoColor: true}
 	var buf bytes.Buffer
 
 	m := searcher.Match{
@@ -48,7 +48,7 @@ func TestPrinterContext(t *testing.T) {
 }
 
 func TestPrinterContextSeparator(t *testing.T) {
-	p := &Printer{}
+	p := &Printer{NoColor: true}
 	var buf bytes.Buffer
 
 	m1 := searcher.Match{
@@ -87,7 +87,7 @@ func TestPrinterContextSeparator(t *testing.T) {
 }
 
 func TestPrinterNoContextNoSeparator(t *testing.T) {
-	p := &Printer{}
+	p := &Printer{NoColor: true}
 	var buf bytes.Buffer
 
 	m1 := searcher.Match{Path: "a.txt", Line: 1, Content: "HIT one"}
@@ -108,7 +108,7 @@ func TestPrinterNoContextNoSeparator(t *testing.T) {
 
 func TestPrinterContextEdges(t *testing.T) {
 	// First-line hit: empty Before; last-line hit: empty After.
-	p := &Printer{}
+	p := &Printer{NoColor: true}
 	var buf bytes.Buffer
 
 	first := searcher.Match{
@@ -139,5 +139,23 @@ func TestPrinterContextEdges(t *testing.T) {
 		"e.txt:3:HIT last\n"
 	if got := buf.String(); got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestPrinterNoColorFlag(t *testing.T) {
+	// Even if the global color package would emit ANSI, NoColor must force plain text.
+	p := &Printer{NoColor: true}
+	var buf bytes.Buffer
+	m := searcher.Match{Path: "main.go", Line: 3, Content: "TODO fix me"}
+	if err := p.WriteMatch(&buf, m); err != nil {
+		t.Fatalf("WriteMatch: %v", err)
+	}
+	got := buf.String()
+	want := "main.go:3:TODO fix me\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if bytes.Contains(buf.Bytes(), []byte{0x1b}) {
+		t.Errorf("unexpected ANSI codes in no-color output: %q", got)
 	}
 }

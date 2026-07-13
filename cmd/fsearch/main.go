@@ -28,6 +28,7 @@ func newRootCmd() *cobra.Command {
 		ignores      []string
 		ignoreCase   bool
 		contextLines int
+		noColor      bool
 	)
 
 	cmd := &cobra.Command{
@@ -41,7 +42,8 @@ Examples:
   fsearch "TODO" . --ext go,md
   fsearch "FIXME" ./internal --ignore vendor
   fsearch "todo" . -i
-  fsearch "TODO" . -C 2`,
+  fsearch "TODO" . -C 2
+  fsearch "TODO" . --no-color`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if contextLines < 0 {
@@ -57,7 +59,7 @@ Examples:
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
-			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(), noColor)
 		},
 	}
 
@@ -65,6 +67,7 @@ Examples:
 	cmd.Flags().StringArrayVar(&ignores, "ignore", nil, "basename or pattern to ignore (repeatable)")
 	cmd.Flags().BoolVarP(&ignoreCase, "ignore-case", "i", false, "case-insensitive search")
 	cmd.Flags().IntVarP(&contextLines, "context", "C", 0, "lines of context before and after each match")
+	cmd.Flags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	cmd.SilenceUsage = true
 
 	return cmd
@@ -88,7 +91,8 @@ func buildOptions(keyword, root, exts string, ignores []string, ignoreCase bool,
 
 // run executes search: hits go to stdout, skip warnings to stderr.
 // If stderr is nil, warnings are discarded.
-func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer) error {
+// noColor forces plain output (also auto-disabled for non-TTY via fatih/color).
+func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, noColor bool) error {
 	if stderr == nil {
 		stderr = io.Discard
 	}
@@ -109,6 +113,7 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer) e
 	printer := &output.Printer{
 		Keyword:    opts.Keyword,
 		IgnoreCase: opts.IgnoreCase,
+		NoColor:    noColor,
 	}
 	g.Go(func() error {
 		for m := range results {

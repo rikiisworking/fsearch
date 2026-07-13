@@ -225,7 +225,7 @@ func TestCLISmokeContext(t *testing.T) {
 
 	var out bytes.Buffer
 	cmd := newRootCmd()
-	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "-C", "1"})
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "-C", "1", "--no-color"})
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 
@@ -263,6 +263,31 @@ func TestCLISmokeContextNegative(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "context must be >= 0") {
 		t.Errorf("error = %v, want context validation message", err)
+	}
+}
+
+func TestCLISmokeNoColor(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "TODO here") {
+		t.Errorf("missing hit: %q", got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("unexpected ANSI codes with --no-color: %q", got)
 	}
 }
 

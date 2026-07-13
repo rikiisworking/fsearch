@@ -38,13 +38,14 @@ func TestParseList(t *testing.T) {
 
 func TestBuildOptions(t *testing.T) {
 	tests := []struct {
-		name       string
-		keyword    string
-		root       string
-		exts       string
-		ignores    []string
-		ignoreCase bool
-		wantOpts   searcher.Options
+		name         string
+		keyword      string
+		root         string
+		exts         string
+		ignores      []string
+		ignoreCase   bool
+		contextLines int
+		wantOpts     searcher.Options
 	}{
 		{
 			name:    "defaults",
@@ -90,11 +91,22 @@ func TestBuildOptions(t *testing.T) {
 				IgnoreCase: true,
 			},
 		},
+		{
+			name:         "context lines",
+			keyword:      "TODO",
+			root:         ".",
+			contextLines: 2,
+			wantOpts: searcher.Options{
+				Root:         ".",
+				Keyword:      "TODO",
+				ContextLines: 2,
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores, tt.ignoreCase)
+			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores, tt.ignoreCase, tt.contextLines)
 			if !reflect.DeepEqual(got, tt.wantOpts) {
 				t.Errorf("buildOptions() = %#v, want %#v", got, tt.wantOpts)
 			}
@@ -199,6 +211,58 @@ func TestCLISmokeIgnoreCase(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "TODO here") {
 		t.Errorf("-i output missing hit: %q", out.String())
+	}
+}
+
+func TestCLISmokeContext(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	// line1 package, line2 blank-ish comment prev, line3 TODO, line4 next
+	content := "package a\n// prev\n// TODO here\n// next\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "-C", "1"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+
+	got := out.String()
+	// Hit line uses :
+	if !strings.Contains(got, ":3:// TODO here") && !strings.Contains(got, path+":3:// TODO here") {
+		// path may be absolute; check line:content form
+		if !strings.Contains(got, ":3:// TODO here") {
+			t.Errorf("missing hit line: %q", got)
+		}
+	}
+	// Context lines use -
+	if !strings.Contains(got, "-2-// prev") {
+		t.Errorf("missing before context: %q", got)
+	}
+	if !strings.Contains(got, "-4-// next") {
+		t.Errorf("missing after context: %q", got)
+	}
+}
+
+func TestCLISmokeContextNegative(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", ".", "-C", "-1"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for negative context")
+	}
+	if !strings.Contains(err.Error(), "context must be >= 0") {
+		t.Errorf("error = %v, want context validation message", err)
 	}
 }
 

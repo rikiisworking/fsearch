@@ -20,7 +20,7 @@ import (
 )
 
 // fileOpError is a per-file I/O or scan failure. Search skips the file and
-// may report it via OnError. Emit/callback errors are not wrapped in this type.
+// may report it via OnError.
 type fileOpError struct {
 	op   string
 	path string
@@ -70,17 +70,18 @@ type FileOptions struct {
 }
 
 // Search walks Root and searches files concurrently for Keyword.
-// emit is called for each match (serialized with a mutex; safe for stdout).
+// Matches are sent to results. The caller owns results (Search does not close it).
+// The caller must consume results concurrently or risk deadlock when the buffer fills.
 // Match order is not guaranteed.
-func Search(ctx context.Context, opts Options, emit func(Match) error) error {
+func Search(ctx context.Context, opts Options, results chan<- Match) error {
 	if strings.TrimSpace(opts.Keyword) == "" {
 		return fmt.Errorf("searcher: keyword is required")
 	}
 	if opts.Root == "" {
 		opts.Root = "."
 	}
-	if emit == nil {
-		return fmt.Errorf("searcher: emit is nil")
+	if results == nil {
+		return fmt.Errorf("searcher: results is nil")
 	}
 
 	workers := opts.Workers
@@ -105,20 +106,15 @@ func Search(ctx context.Context, opts Options, emit func(Match) error) error {
 		ContextLines: opts.ContextLines,
 	}
 
-	var emitMu sync.Mutex
 	for i := 0; i < workers; i++ {
 		g.Go(func() error {
 			for path := range files {
-				err := searchFile(ctx, path, fileOpts, func(m Match) error {
-					emitMu.Lock()
-					defer emitMu.Unlock()
-					return emit(m)
-				})
+				err := searchFile(ctx, path, fileOpts, results)
 				if err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					// Per-file I/O: skip + optional OnError. Emit errors stop Search.
+					// Per-file I/O: skip + optional OnError.
 					var fe *fileOpError
 					if errors.As(err, &fe) {
 						if opts.OnError != nil {
@@ -141,25 +137,34 @@ func Search(ctx context.Context, opts Options, emit func(Match) error) error {
 // Binary files (NUL in the first 8KiB) return nil, nil.
 // Before/After are left empty until Sprint 2 context lines.
 func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, error) {
+	results := make(chan Match, 32)
 	var matches []Match
-	err := searchFile(ctx, path, opts, func(m Match) error {
-		matches = append(matches, m)
-		return nil
-	})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for m := range results {
+			matches = append(matches, m)
+		}
+	}()
+
+	err := searchFile(ctx, path, opts, results)
+	close(results)
+	wg.Wait()
 	if err != nil {
 		return nil, err
 	}
 	return matches, nil
 }
 
-// searchFile scans path and calls emit for each hit as it is found (no full-file buffer).
-// Binary files (NUL in the first 8KiB) return nil without calling emit.
-func searchFile(ctx context.Context, path string, opts FileOptions, emit func(Match) error) error {
+// searchFile scans path and sends each hit to results (does not close results).
+// Binary files (NUL in the first 8KiB) return nil without sending.
+func searchFile(ctx context.Context, path string, opts FileOptions, results chan<- Match) error {
 	if opts.Keyword == "" {
 		return fmt.Errorf("searcher: keyword is required")
 	}
-	if emit == nil {
-		return fmt.Errorf("searcher: emit is nil")
+	if results == nil {
+		return fmt.Errorf("searcher: results is nil")
 	}
 
 	select {
@@ -210,14 +215,18 @@ func searchFile(ctx context.Context, path string, opts FileOptions, emit func(Ma
 			}
 		}
 		line := scanner.Text()
-		if lineMatch(line, keyword, opts.IgnoreCase) {
-			if err := emit(Match{
-				Path:    path,
-				Line:    lineNum,
-				Content: line,
-			}); err != nil {
-				return err // pass through; not a file I/O error
-			}
+		if !lineMatch(line, keyword, opts.IgnoreCase) {
+			continue
+		}
+		m := Match{
+			Path:    path,
+			Line:    lineNum,
+			Content: line,
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case results <- m:
 		}
 	}
 	if err := scanner.Err(); err != nil {

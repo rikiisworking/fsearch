@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/nick/fsearch/internal/output"
 	"github.com/nick/fsearch/internal/searcher"
@@ -83,9 +84,27 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer) e
 	opts.OnError = func(path string, err error) {
 		fmt.Fprintf(stderr, "fsearch: skip %s: %v\n", path, err)
 	}
-	return searcher.Search(ctx, opts, func(m searcher.Match) error {
-		return output.WriteMatch(stdout, m)
+
+	results := make(chan searcher.Match, 64)
+	g, ctx := errgroup.WithContext(ctx)
+
+	// Producer: search sends matches, then we close the channel.
+	g.Go(func() error {
+		defer close(results)
+		return searcher.Search(ctx, opts, results)
 	})
+
+	// Consumer: single writer to stdout (no mutex needed).
+	g.Go(func() error {
+		for m := range results {
+			if err := output.WriteMatch(stdout, m); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	return g.Wait()
 }
 
 // parseList splits a comma-separated flag value into trimmed non-empty parts.

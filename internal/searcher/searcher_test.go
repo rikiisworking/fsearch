@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func TestSearchFileHits(t *testing.T) {
@@ -123,15 +125,11 @@ func TestSearch(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "sub", "c.go"), "TODO again\n")
 	mustWrite(t, filepath.Join(root, ".git", "x"), "TODO hidden\n")
 
-	var got []Match
-	err := Search(context.Background(), Options{
+	got, err := collectSearch(context.Background(), Options{
 		Root:        root,
 		Keyword:     "TODO",
 		AllowedExts: []string{"go"},
 		Workers:     2,
-	}, func(m Match) error {
-		got = append(got, m)
-		return nil
 	})
 	if err != nil {
 		t.Errorf("Search: %v", err)
@@ -152,11 +150,16 @@ func TestSearch(t *testing.T) {
 }
 
 func TestSearchEmptyKeyword(t *testing.T) {
-	err := Search(context.Background(), Options{Root: ".", Keyword: ""}, func(Match) error {
-		return nil
-	})
+	err := Search(context.Background(), Options{Root: ".", Keyword: ""}, make(chan Match))
 	if err == nil {
 		t.Errorf("expected error for empty keyword")
+	}
+}
+
+func TestSearchNilResults(t *testing.T) {
+	err := Search(context.Background(), Options{Root: ".", Keyword: "x"}, nil)
+	if err == nil {
+		t.Errorf("expected error for nil results")
 	}
 }
 
@@ -180,11 +183,10 @@ func TestSearchOnError(t *testing.T) {
 	}
 
 	var (
-		mu         sync.Mutex
-		errPaths   []string
-		hitContent []string
+		mu       sync.Mutex
+		errPaths []string
 	)
-	err := Search(context.Background(), Options{
+	got, err := collectSearch(context.Background(), Options{
 		Root:    root,
 		Keyword: "TODO",
 		Workers: 2,
@@ -193,11 +195,6 @@ func TestSearchOnError(t *testing.T) {
 			errPaths = append(errPaths, path)
 			mu.Unlock()
 		},
-	}, func(m Match) error {
-		mu.Lock()
-		hitContent = append(hitContent, m.Content)
-		mu.Unlock()
-		return nil
 	})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
@@ -206,9 +203,31 @@ func TestSearchOnError(t *testing.T) {
 	if len(errPaths) != 1 || errPaths[0] != bad {
 		t.Errorf("OnError paths = %v, want [%q]", errPaths, bad)
 	}
-	if len(hitContent) != 1 || hitContent[0] != "// TODO ok" {
-		t.Errorf("hits = %v, want one good hit", hitContent)
+	if len(got) != 1 || got[0].Content != "// TODO ok" {
+		t.Errorf("hits = %v, want one good hit", got)
 	}
+}
+
+// collectSearch runs Search with a results channel and returns collected matches.
+func collectSearch(ctx context.Context, opts Options) ([]Match, error) {
+	results := make(chan Match, 32)
+	var got []Match
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		defer close(results)
+		return Search(ctx, opts, results)
+	})
+	g.Go(func() error {
+		for m := range results {
+			got = append(got, m)
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	return got, nil
 }
 
 func mustWrite(t *testing.T, path, content string) {

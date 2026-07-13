@@ -291,6 +291,64 @@ func TestCLISmokeNoColor(t *testing.T) {
 	}
 }
 
+func TestCLISmokeIgnore(t *testing.T) {
+	root := t.TempDir()
+	// Keyword only under ignored basename path.
+	if err := os.WriteFile(filepath.Join(root, "keep.go"), []byte("package keep\n// no hit\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile keep: %v", err)
+	}
+	secretDir := filepath.Join(root, "secret")
+	if err := os.MkdirAll(secretDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "a.go"), []byte("package secret\n// TODO hidden\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile secret: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "--ignore", "secret"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	if got := out.String(); got != "" {
+		t.Errorf("want empty output when hit is under --ignore, got %q", got)
+	}
+}
+
+func TestCLISmokeDefaultPath(t *testing.T) {
+	// Keyword-only args should search under "." (current working directory).
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", "--ext", "go", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "TODO here") {
+		t.Errorf("default path output missing hit: %q", out.String())
+	}
+}
+
 func TestCLISmokeSkipWarning(t *testing.T) {
 	root := t.TempDir()
 	good := filepath.Join(root, "good.go")

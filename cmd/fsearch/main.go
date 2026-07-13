@@ -3,11 +3,14 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/nick/fsearch/internal/output"
 	"github.com/nick/fsearch/internal/searcher"
@@ -42,38 +45,12 @@ Examples:
 			if len(args) > 1 {
 				root = args[1]
 			}
-
-			var allowedExts []string
-			if strings.TrimSpace(exts) != "" {
-				for _, e := range strings.Split(exts, ",") {
-					e = strings.TrimSpace(e)
-					if e != "" {
-						allowedExts = append(allowedExts, e)
-					}
-				}
-			}
-
-			var skipPatterns []string
-			for _, ig := range ignores {
-				for _, p := range strings.Split(ig, ",") {
-					p = strings.TrimSpace(p)
-					if p != "" {
-						skipPatterns = append(skipPatterns, p)
-					}
-				}
-			}
+			opts := buildOptions(keyword, root, exts, ignores)
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
-			return searcher.Search(ctx, searcher.Options{
-				Root:         root,
-				Keyword:      keyword,
-				AllowedExts:  allowedExts,
-				SkipPatterns: skipPatterns,
-			}, func(m searcher.Match) error {
-				return output.WriteMatch(cmd.OutOrStdout(), m.Path, m.Line, m.Content)
-			})
+			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 
@@ -82,4 +59,66 @@ Examples:
 	cmd.SilenceUsage = true
 
 	return cmd
+}
+
+// buildOptions turns CLI args/flags into searcher.Options.
+func buildOptions(keyword, root, exts string, ignores []string) searcher.Options {
+	var skip []string
+	for _, ig := range ignores {
+		skip = append(skip, parseList(ig)...)
+	}
+	return searcher.Options{
+		Root:         root,
+		Keyword:      keyword,
+		AllowedExts:  parseList(exts),
+		SkipPatterns: skip,
+	}
+}
+
+// run executes search: hits go to stdout, skip warnings to stderr.
+// If stderr is nil, warnings are discarded.
+func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer) error {
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	opts.OnError = func(path string, err error) {
+		fmt.Fprintf(stderr, "fsearch: skip %s: %v\n", path, err)
+	}
+
+	results := make(chan searcher.Match, 64)
+	g, ctx := errgroup.WithContext(ctx)
+
+	// Producer: search sends matches, then we close the channel.
+	g.Go(func() error {
+		defer close(results)
+		return searcher.Search(ctx, opts, results)
+	})
+
+	// Consumer: single writer to stdout (no mutex needed).
+	g.Go(func() error {
+		for m := range results {
+			if err := output.WriteMatch(stdout, m); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	return g.Wait()
+}
+
+// parseList splits a comma-separated flag value into trimmed non-empty parts.
+// "" and "  " yield nil. "go, md" yields ["go", "md"].
+func parseList(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/fatih/color"
 
@@ -12,7 +13,7 @@ import (
 )
 
 // Printer formats Match values for the terminal.
-// Keyword and IgnoreCase are used for hit-line keyword highlighting (later).
+// Keyword and IgnoreCase drive hit-line keyword highlighting.
 // NoColor forces plain text; otherwise colors follow TTY / NO_COLOR via fatih/color.
 type Printer struct {
 	Keyword    string
@@ -38,8 +39,8 @@ type Printer struct {
 // A "--" separator is printed before each match that has context after the first
 // match written by this Printer.
 //
-// When color is enabled, path is magenta and line number is green. Content is
-// left uncolored (keyword highlight lands in a later step).
+// When color is enabled: path is magenta, line number is green, and keyword
+// occurrences on the hit line are bold red. Context lines are not keyword-highlighted.
 func (p *Printer) WriteMatch(w io.Writer, m searcher.Match) error {
 	if p == nil {
 		p = &Printer{NoColor: true}
@@ -52,7 +53,7 @@ func (p *Printer) WriteMatch(w io.Writer, m searcher.Match) error {
 		}
 	}
 
-	// Before context: path-line:text
+	// Before context: path-line:text (no keyword highlight)
 	for i, line := range m.Before {
 		lineNo := m.Line - len(m.Before) + i
 		if err := p.writeLine(w, m.Path, lineNo, line, '-', true); err != nil {
@@ -60,12 +61,12 @@ func (p *Printer) WriteMatch(w io.Writer, m searcher.Match) error {
 		}
 	}
 
-	// Hit line: path:line:text
+	// Hit line: path:line:text (keyword highlighted when color on)
 	if err := p.writeLine(w, m.Path, m.Line, m.Content, ':', false); err != nil {
 		return err
 	}
 
-	// After context: path-line:text
+	// After context: path-line:text (no keyword highlight)
 	for i, line := range m.After {
 		if err := p.writeLine(w, m.Path, m.Line+1+i, line, '-', true); err != nil {
 			return err
@@ -77,10 +78,15 @@ func (p *Printer) WriteMatch(w io.Writer, m searcher.Match) error {
 }
 
 // writeLine writes path{sep}line{sep}content\n with optional color on path/line.
+// Keyword highlight is applied only for hit lines (isContext == false).
 func (p *Printer) writeLine(w io.Writer, path string, lineNo int, content string, sep byte, isContext bool) error {
 	pathPart := p.colorPath(path, isContext)
 	linePart := p.colorLine(lineNo, isContext)
-	if _, err := fmt.Fprintf(w, "%s%c%s%c%s\n", pathPart, sep, linePart, sep, content); err != nil {
+	contentPart := content
+	if !isContext {
+		contentPart = p.highlightContent(content)
+	}
+	if _, err := fmt.Fprintf(w, "%s%c%s%c%s\n", pathPart, sep, linePart, sep, contentPart); err != nil {
 		return fmt.Errorf("output: write line: %w", err)
 	}
 	return nil
@@ -115,6 +121,53 @@ func (p *Printer) colorLine(lineNo int, isContext bool) string {
 		c.Add(color.Faint)
 	}
 	return c.Sprint(s)
+}
+
+// highlightContent wraps keyword occurrences in bold red when color is enabled.
+// When color is off or keyword is empty, returns content unchanged.
+func (p *Printer) highlightContent(content string) string {
+	return highlight(content, p.Keyword, p.IgnoreCase, p.useColor())
+}
+
+// highlight returns content with each non-overlapping keyword occurrence wrapped
+// in bold red ANSI codes when enabled is true. Empty keyword returns content as-is.
+// Matching uses strings.Contains semantics: case-sensitive unless ignoreCase.
+func highlight(content, keyword string, ignoreCase, enabled bool) string {
+	if !enabled || keyword == "" {
+		return content
+	}
+
+	var b strings.Builder
+	rest := content
+	kwLen := len(keyword)
+	// Lowercase forms for case-insensitive index search; emit original slices.
+	kwFind := keyword
+	if ignoreCase {
+		kwFind = strings.ToLower(keyword)
+	}
+
+	for rest != "" {
+		hay := rest
+		if ignoreCase {
+			hay = strings.ToLower(rest)
+		}
+		i := strings.Index(hay, kwFind)
+		if i < 0 {
+			b.WriteString(rest)
+			break
+		}
+		// Prefix before match (original casing).
+		b.WriteString(rest[:i])
+		// Matched span from original string (preserve casing).
+		match := rest[i : i+kwLen]
+		// EnableColor on this instance so highlight works even when the
+		// global color.NoColor is true (caller already gated with enabled).
+		c := color.New(color.FgRed, color.Bold)
+		c.EnableColor()
+		b.WriteString(c.Sprint(match))
+		rest = rest[i+kwLen:]
+	}
+	return b.String()
 }
 
 // WriteMatch prints one hit using a plain (no-color) Printer.

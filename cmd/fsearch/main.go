@@ -24,8 +24,9 @@ func main() {
 
 func newRootCmd() *cobra.Command {
 	var (
-		exts    string
-		ignores []string
+		exts       string
+		ignores    []string
+		ignoreCase bool
 	)
 
 	cmd := &cobra.Command{
@@ -37,7 +38,8 @@ func newRootCmd() *cobra.Command {
 Examples:
   fsearch "TODO" .
   fsearch "TODO" . --ext go,md
-  fsearch "FIXME" ./internal --ignore vendor`,
+  fsearch "FIXME" ./internal --ignore vendor
+  fsearch "todo" . -i`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keyword := args[0]
@@ -45,7 +47,7 @@ Examples:
 			if len(args) > 1 {
 				root = args[1]
 			}
-			opts := buildOptions(keyword, root, exts, ignores)
+			opts := buildOptions(keyword, root, exts, ignores, ignoreCase)
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
@@ -56,13 +58,14 @@ Examples:
 
 	cmd.Flags().StringVar(&exts, "ext", "", "comma-separated file extensions to include (e.g. go,md)")
 	cmd.Flags().StringArrayVar(&ignores, "ignore", nil, "basename or pattern to ignore (repeatable)")
+	cmd.Flags().BoolVarP(&ignoreCase, "ignore-case", "i", false, "case-insensitive search")
 	cmd.SilenceUsage = true
 
 	return cmd
 }
 
 // buildOptions turns CLI args/flags into searcher.Options.
-func buildOptions(keyword, root, exts string, ignores []string) searcher.Options {
+func buildOptions(keyword, root, exts string, ignores []string, ignoreCase bool) searcher.Options {
 	var skip []string
 	for _, ig := range ignores {
 		skip = append(skip, parseList(ig)...)
@@ -72,6 +75,7 @@ func buildOptions(keyword, root, exts string, ignores []string) searcher.Options
 		Keyword:      keyword,
 		AllowedExts:  parseList(exts),
 		SkipPatterns: skip,
+		IgnoreCase:   ignoreCase,
 	}
 }
 

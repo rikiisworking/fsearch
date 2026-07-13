@@ -38,12 +38,13 @@ func TestParseList(t *testing.T) {
 
 func TestBuildOptions(t *testing.T) {
 	tests := []struct {
-		name     string
-		keyword  string
-		root     string
-		exts     string
-		ignores  []string
-		wantOpts searcher.Options
+		name       string
+		keyword    string
+		root       string
+		exts       string
+		ignores    []string
+		ignoreCase bool
+		wantOpts   searcher.Options
 	}{
 		{
 			name:    "defaults",
@@ -78,11 +79,22 @@ func TestBuildOptions(t *testing.T) {
 				SkipPatterns: []string{"a", "b", "c"},
 			},
 		},
+		{
+			name:       "ignore-case",
+			keyword:    "todo",
+			root:       ".",
+			ignoreCase: true,
+			wantOpts: searcher.Options{
+				Root:       ".",
+				Keyword:    "todo",
+				IgnoreCase: true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores)
+			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores, tt.ignoreCase)
 			if !reflect.DeepEqual(got, tt.wantOpts) {
 				t.Errorf("buildOptions() = %#v, want %#v", got, tt.wantOpts)
 			}
@@ -153,6 +165,40 @@ func TestCLISmokeMissingArgs(t *testing.T) {
 
 	if err := cmd.Execute(); err == nil {
 		t.Errorf("expected error for missing args")
+	}
+}
+
+func TestCLISmokeIgnoreCase(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Case-sensitive (default): lowercase keyword misses TODO
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"todo", root, "--ext", "go"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute (sensitive): %v\nout=%q", err, out.String())
+	}
+	if got := out.String(); got != "" {
+		t.Errorf("case-sensitive want empty, got %q", got)
+	}
+
+	// Ignore-case: should hit
+	out.Reset()
+	cmd = newRootCmd()
+	cmd.SetArgs([]string{"todo", root, "--ext", "go", "-i"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute (-i): %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "TODO here") {
+		t.Errorf("-i output missing hit: %q", out.String())
 	}
 }
 

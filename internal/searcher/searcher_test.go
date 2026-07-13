@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -16,7 +17,7 @@ func TestSearchFileHits(t *testing.T) {
 		return
 	}
 
-	matches, err := SearchFile(context.Background(), path, "TODO")
+	matches, err := SearchFile(context.Background(), path, FileOptions{Keyword: "TODO"})
 	if err != nil {
 		t.Errorf("SearchFile: %v", err)
 		return
@@ -34,6 +35,9 @@ func TestSearchFileHits(t *testing.T) {
 	if matches[0].Content != "// TODO: first" {
 		t.Errorf("content = %q", matches[0].Content)
 	}
+	if matches[0].Before != nil || matches[0].After != nil {
+		t.Errorf("context slices should be empty for now: %+v", matches[0])
+	}
 }
 
 func TestSearchFileNoMatch(t *testing.T) {
@@ -44,7 +48,7 @@ func TestSearchFileNoMatch(t *testing.T) {
 		return
 	}
 
-	matches, err := SearchFile(context.Background(), path, "TODO")
+	matches, err := SearchFile(context.Background(), path, FileOptions{Keyword: "TODO"})
 	if err != nil {
 		t.Errorf("SearchFile: %v", err)
 		return
@@ -55,7 +59,7 @@ func TestSearchFileNoMatch(t *testing.T) {
 }
 
 func TestSearchFileEmptyKeyword(t *testing.T) {
-	_, err := SearchFile(context.Background(), "x", "")
+	_, err := SearchFile(context.Background(), "x", FileOptions{Keyword: ""})
 	if err == nil {
 		t.Errorf("expected error for empty keyword")
 	}
@@ -70,13 +74,45 @@ func TestSearchFileBinary(t *testing.T) {
 		return
 	}
 
-	matches, err := SearchFile(context.Background(), path, "hello")
+	matches, err := SearchFile(context.Background(), path, FileOptions{Keyword: "hello"})
 	if err != nil {
 		t.Errorf("SearchFile: %v", err)
 		return
 	}
 	if matches != nil {
 		t.Errorf("binary should be skipped, got %v", matches)
+	}
+}
+
+func TestSearchFileIgnoreCase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("todo one\nTODO two\nToDo three\nnope\n"), 0o644); err != nil {
+		t.Errorf("WriteFile: %v", err)
+		return
+	}
+
+	// Case-sensitive (default): only exact "TODO"
+	got, err := SearchFile(context.Background(), path, FileOptions{Keyword: "TODO"})
+	if err != nil {
+		t.Errorf("SearchFile: %v", err)
+		return
+	}
+	if len(got) != 1 || got[0].Line != 2 {
+		t.Errorf("case-sensitive: got %+v, want 1 hit on line 2", got)
+	}
+
+	// Ignore case: all three variants
+	got, err = SearchFile(context.Background(), path, FileOptions{
+		Keyword:    "TODO",
+		IgnoreCase: true,
+	})
+	if err != nil {
+		t.Errorf("SearchFile: %v", err)
+		return
+	}
+	if len(got) != 3 {
+		t.Errorf("ignore-case: got %d hits, want 3: %+v", len(got), got)
 	}
 }
 
@@ -121,6 +157,57 @@ func TestSearchEmptyKeyword(t *testing.T) {
 	})
 	if err == nil {
 		t.Errorf("expected error for empty keyword")
+	}
+}
+
+func TestSearchOnError(t *testing.T) {
+	root := t.TempDir()
+	good := filepath.Join(root, "good.go")
+	bad := filepath.Join(root, "bad.go")
+	mustWrite(t, good, "package good\n// TODO ok\n")
+	mustWrite(t, bad, "package bad\n// TODO hidden by perms\n")
+
+	if err := os.Chmod(bad, 0); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	// Restore perms so TempDir cleanup can remove the file.
+	t.Cleanup(func() { _ = os.Chmod(bad, 0o644) })
+
+	// If we can still open it (e.g. running as root), OnError won't fire.
+	if f, err := os.Open(bad); err == nil {
+		f.Close()
+		t.Skip("unreadable file still openable (root?); skip OnError test")
+	}
+
+	var (
+		mu         sync.Mutex
+		errPaths   []string
+		hitContent []string
+	)
+	err := Search(context.Background(), Options{
+		Root:    root,
+		Keyword: "TODO",
+		Workers: 2,
+		OnError: func(path string, err error) {
+			mu.Lock()
+			errPaths = append(errPaths, path)
+			mu.Unlock()
+		},
+	}, func(m Match) error {
+		mu.Lock()
+		hitContent = append(hitContent, m.Content)
+		mu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if len(errPaths) != 1 || errPaths[0] != bad {
+		t.Errorf("OnError paths = %v, want [%q]", errPaths, bad)
+	}
+	if len(hitContent) != 1 || hitContent[0] != "// TODO ok" {
+		t.Errorf("hits = %v, want one good hit", hitContent)
 	}
 }
 

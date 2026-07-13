@@ -3,11 +3,18 @@ package output
 import (
 	"bytes"
 	"testing"
+
+	"github.com/nick/fsearch/internal/searcher"
 )
 
 func TestWriteMatch(t *testing.T) {
 	var buf bytes.Buffer
-	if err := WriteMatch(&buf, "main.go", 3, "TODO fix me"); err != nil {
+	m := searcher.Match{
+		Path:    "main.go",
+		Line:    3,
+		Content: "TODO fix me",
+	}
+	if err := WriteMatch(&buf, m); err != nil {
 		t.Errorf("WriteMatch: %v", err)
 		return
 	}

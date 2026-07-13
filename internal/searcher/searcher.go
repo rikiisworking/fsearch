@@ -66,7 +66,7 @@ type Options struct {
 type FileOptions struct {
 	Keyword      string
 	IgnoreCase   bool
-	ContextLines int // accepted now; filled on Match in a later step
+	ContextLines int // lines of context before/after each hit; 0 = none
 }
 
 // Search walks Root and searches files concurrently for Keyword.
@@ -135,7 +135,7 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 // SearchFile scans path for literal keyword matches.
 // Returns one Match per matching line. Line numbers are 1-based.
 // Binary files (NUL in the first 8KiB) return nil, nil.
-// Before/After are left empty until Sprint 2 context lines.
+// When opts.ContextLines > 0, each Match includes Before/After context.
 func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, error) {
 	results := make(chan Match, 32)
 	var matches []Match
@@ -159,6 +159,8 @@ func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, er
 
 // searchFile scans path and sends each hit to results (does not close results).
 // Binary files (NUL in the first 8KiB) return nil without sending.
+// When ContextLines == 0, streams line-by-line. When > 0, buffers lines so
+// Before/After can be filled on each Match.
 func searchFile(ctx context.Context, path string, opts FileOptions, results chan<- Match) error {
 	if opts.Keyword == "" {
 		return fmt.Errorf("searcher: keyword is required")
@@ -192,21 +194,26 @@ func searchFile(ctx context.Context, path string, opts FileOptions, results chan
 		return fileErr("seek", path, err)
 	}
 
-	scanner := bufio.NewScanner(f)
-	// Allow longer lines than the default 64KiB token limit.
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
 	// Pre-lower keyword once when ignoring case.
 	keyword := opts.Keyword
 	if opts.IgnoreCase {
 		keyword = strings.ToLower(keyword)
 	}
 
+	// Context path: buffer whole file so each hit can get Before/After.
+	if opts.ContextLines > 0 {
+		lines, err := readAllLines(ctx, f, path)
+		if err != nil {
+			return err
+		}
+		return emitMatches(ctx, path, lines, keyword, opts, results)
+	}
+
+	// Fast path: stream without buffering.
+	scanner := newLineScanner(f)
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
-		// Cheap cancel check every so often (not every line).
 		if lineNum%512 == 0 {
 			select {
 			case <-ctx.Done():
@@ -233,6 +240,84 @@ func searchFile(ctx context.Context, path string, opts FileOptions, results chan
 		return fileErr("scan", path, err)
 	}
 	return nil
+}
+
+// emitMatches sends one Match per matching line in lines.
+// Fills Before/After using opts.ContextLines (caller should only use when > 0).
+func emitMatches(ctx context.Context, path string, lines []string, keyword string, opts FileOptions, results chan<- Match) error {
+	n := opts.ContextLines
+	for i, line := range lines {
+		if i%512 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+		if !lineMatch(line, keyword, opts.IgnoreCase) {
+			continue
+		}
+
+		beforeStart := i - n
+		if beforeStart < 0 {
+			beforeStart = 0
+		}
+		var before []string
+		if beforeStart < i {
+			before = append([]string(nil), lines[beforeStart:i]...)
+		}
+
+		afterEnd := i + 1 + n
+		if afterEnd > len(lines) {
+			afterEnd = len(lines)
+		}
+		var after []string
+		if i+1 < afterEnd {
+			after = append([]string(nil), lines[i+1:afterEnd]...)
+		}
+
+		m := Match{
+			Path:    path,
+			Line:    i + 1,
+			Content: line,
+			Before:  before,
+			After:   after,
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case results <- m:
+		}
+	}
+	return nil
+}
+
+// readAllLines scans f into a slice of lines (without trailing newlines).
+func readAllLines(ctx context.Context, f *os.File, path string) ([]string, error) {
+	scanner := newLineScanner(f)
+	var lines []string
+	for scanner.Scan() {
+		if len(lines)%512 == 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fileErr("scan", path, err)
+	}
+	return lines, nil
+}
+
+func newLineScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	// Allow longer lines than the default 64KiB token limit.
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+	return scanner
 }
 
 // lineMatch reports whether line contains keyword.

@@ -38,8 +38,175 @@ func TestSearchFileHits(t *testing.T) {
 		t.Errorf("content = %q", matches[0].Content)
 	}
 	if matches[0].Before != nil || matches[0].After != nil {
-		t.Errorf("context slices should be empty for now: %+v", matches[0])
+		t.Errorf("context slices should be empty when ContextLines=0: %+v", matches[0])
 	}
+}
+
+func TestSearchFileContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	// lines: 1=alpha, 2=beta, 3=HIT one, 4=gamma, 5=HIT two, 6=delta
+	content := "alpha\nbeta\nHIT one\ngamma\nHIT two\ndelta\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		n       int
+		wantLen int
+		check   func(t *testing.T, matches []Match)
+	}{
+		{
+			name:    "N=0 empty context",
+			n:       0,
+			wantLen: 2,
+			check: func(t *testing.T, matches []Match) {
+				for _, m := range matches {
+					if m.Before != nil || m.After != nil {
+						t.Errorf("want nil context, got Before=%v After=%v", m.Before, m.After)
+					}
+				}
+			},
+		},
+		{
+			name:    "N=1 middle hits",
+			n:       1,
+			wantLen: 2,
+			check: func(t *testing.T, matches []Match) {
+				if matches[0].Line != 3 || matches[0].Content != "HIT one" {
+					t.Errorf("match0 = %+v", matches[0])
+				}
+				if !equalStrings(matches[0].Before, []string{"beta"}) {
+					t.Errorf("match0 Before = %v, want [beta]", matches[0].Before)
+				}
+				if !equalStrings(matches[0].After, []string{"gamma"}) {
+					t.Errorf("match0 After = %v, want [gamma]", matches[0].After)
+				}
+				if matches[1].Line != 5 {
+					t.Errorf("match1 line = %d", matches[1].Line)
+				}
+				if !equalStrings(matches[1].Before, []string{"gamma"}) {
+					t.Errorf("match1 Before = %v, want [gamma]", matches[1].Before)
+				}
+				if !equalStrings(matches[1].After, []string{"delta"}) {
+					t.Errorf("match1 After = %v, want [delta]", matches[1].After)
+				}
+			},
+		},
+		{
+			name:    "N larger than file clamps",
+			n:       100,
+			wantLen: 2,
+			check: func(t *testing.T, matches []Match) {
+				if !equalStrings(matches[0].Before, []string{"alpha", "beta"}) {
+					t.Errorf("match0 Before = %v", matches[0].Before)
+				}
+				if !equalStrings(matches[0].After, []string{"gamma", "HIT two", "delta"}) {
+					t.Errorf("match0 After = %v", matches[0].After)
+				}
+				if !equalStrings(matches[1].Before, []string{"alpha", "beta", "HIT one", "gamma"}) {
+					t.Errorf("match1 Before = %v", matches[1].Before)
+				}
+				if !equalStrings(matches[1].After, []string{"delta"}) {
+					t.Errorf("match1 After = %v", matches[1].After)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches, err := SearchFile(context.Background(), path, FileOptions{
+				Keyword:      "HIT",
+				ContextLines: tt.n,
+			})
+			if err != nil {
+				t.Fatalf("SearchFile: %v", err)
+			}
+			if len(matches) != tt.wantLen {
+				t.Fatalf("got %d matches, want %d: %+v", len(matches), tt.wantLen, matches)
+			}
+			tt.check(t, matches)
+		})
+	}
+}
+
+func TestSearchFileContextEdges(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "edges.txt")
+	// HIT on first and last line
+	if err := os.WriteFile(path, []byte("HIT first\nmiddle\nHIT last\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	matches, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword:      "HIT",
+		ContextLines: 1,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("got %d matches, want 2", len(matches))
+	}
+
+	// first line: empty Before, After = middle
+	if matches[0].Line != 1 {
+		t.Errorf("match0 line = %d", matches[0].Line)
+	}
+	if len(matches[0].Before) != 0 {
+		t.Errorf("match0 Before = %v, want empty", matches[0].Before)
+	}
+	if !equalStrings(matches[0].After, []string{"middle"}) {
+		t.Errorf("match0 After = %v", matches[0].After)
+	}
+
+	// last line: Before = middle, empty After
+	if matches[1].Line != 3 {
+		t.Errorf("match1 line = %d", matches[1].Line)
+	}
+	if !equalStrings(matches[1].Before, []string{"middle"}) {
+		t.Errorf("match1 Before = %v", matches[1].Before)
+	}
+	if len(matches[1].After) != 0 {
+		t.Errorf("match1 After = %v, want empty", matches[1].After)
+	}
+}
+
+func TestSearchFileContextIgnoreCase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("prev\ntodo mid\nnext\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	matches, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword:      "TODO",
+		IgnoreCase:   true,
+		ContextLines: 1,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("got %d matches, want 1", len(matches))
+	}
+	if !equalStrings(matches[0].Before, []string{"prev"}) || !equalStrings(matches[0].After, []string{"next"}) {
+		t.Errorf("context = Before=%v After=%v", matches[0].Before, matches[0].After)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestSearchFileNoMatch(t *testing.T) {

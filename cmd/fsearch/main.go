@@ -37,12 +37,18 @@ func newRootCmd() *cobra.Command {
 		Long: `fsearch searches for a keyword inside file contents under a path
 (recursively, including child directories).
 
+Matching is case-sensitive by default; use -i/--ignore-case to ignore case.
+Output is grep-style (path:line:content). On a TTY, path/line/keyword are
+colored; use --no-color or pipe to disable. -C N adds N lines of context
+before and after each hit.
+
 Examples:
   fsearch "TODO" .
   fsearch "TODO" . --ext go,md
   fsearch "FIXME" ./internal --ignore vendor
   fsearch "todo" . -i
   fsearch "TODO" . -C 2
+  fsearch "TODO" . --ext go,md -C 1 -i
   fsearch "TODO" . --no-color`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -20,7 +20,7 @@ Target platform: Linux shell.
 - Test: `go test ./... -v`
 - Test coverage: `go test ./... -cover`
 - Lint (if available): `golangci-lint run`
-- Run example: `./bin/fsearch "TODO" . --ext go,md`
+- Run example: `./bin/fsearch "TODO" . --ext go,md -C 1 -i`
 
 ## Architecture Rules
 - Package layout: cmd/ for entrypoints, internal/ for private packages
@@ -53,8 +53,13 @@ Skeleton, cobra CLI, Makefile, `go build` + `fsearch --help` work.
 Concurrent walker, content matching with line numbers, basic ignore + extension filtering, unit tests.  
 End-to-end: `./bin/fsearch "TODO" . --ext go,md`
 
-**Next: Sprint 2 – CLI Experience & Output**  
-Full flags (--context, --case-sensitive, …), colored output (fatih/color), pretty formatting.
+**Sprint 2 – CLI Experience & Output** ✅ complete  
+Flags: `-i`/`--ignore-case`, `-C`/`--context`, `--no-color` (plus `--ext`, `--ignore`).  
+Context lines filled on `Match.Before`/`After`; grep-style context print; colored path/line + keyword highlight via fatih/color.  
+End-to-end: `./bin/fsearch "TODO" . --ext go,md -C 1 -i`
+
+**Next: Sprint 3 – Performance & Robustness**  
+`.gitignore` support, concurrency tuning/benchmarks, error handling polish.
 
 ## Future Notes
 - Performance is important (should feel snappy on large codebases)

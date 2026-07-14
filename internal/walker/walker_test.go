@@ -39,7 +39,7 @@ func TestWalk(t *testing.T) {
 
 func TestWalkMissingRoot(t *testing.T) {
 	files := make(chan string, 1)
-	err := Walk(context.Background(), filepath.Join(t.TempDir(), "nope"), ignore.New(nil, nil), files)
+	err := Walk(context.Background(), filepath.Join(t.TempDir(), "nope"), ignore.New(nil, nil), files, nil)
 	if err == nil {
 		t.Fatal("expected error for missing root")
 	}
@@ -47,7 +47,7 @@ func TestWalkMissingRoot(t *testing.T) {
 
 func TestWalkNilFilter(t *testing.T) {
 	files := make(chan string, 1)
-	err := Walk(context.Background(), t.TempDir(), nil, files)
+	err := Walk(context.Background(), t.TempDir(), nil, files, nil)
 	if err == nil {
 		t.Fatal("expected error for nil filter")
 	}
@@ -121,7 +121,7 @@ func TestWalkContextCancel(t *testing.T) {
 	cancel() // already cancelled before walk starts
 
 	files := make(chan string, 8)
-	err := Walk(ctx, root, ignore.New(nil, nil), files)
+	err := Walk(ctx, root, ignore.New(nil, nil), files, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Walk error = %v, want context.Canceled", err)
 	}
@@ -135,7 +135,7 @@ func TestWalkContextCancelEmptyTree(t *testing.T) {
 	cancel()
 
 	files := make(chan string, 8)
-	err := Walk(ctx, root, ignore.New(nil, nil), files)
+	err := Walk(ctx, root, ignore.New(nil, nil), files, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Walk empty cancelled = %v, want context.Canceled", err)
 	}
@@ -150,7 +150,7 @@ func TestWalkContextCancelAllFiltered(t *testing.T) {
 
 	// Extension filter matches nothing → no emit path.
 	files := make(chan string, 8)
-	err := Walk(ctx, root, ignore.New([]string{"md"}, nil), files)
+	err := Walk(ctx, root, ignore.New([]string{"md"}, nil), files, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Walk filtered cancelled = %v, want context.Canceled", err)
 	}
@@ -184,6 +184,63 @@ func TestWalkUnreadableDir(t *testing.T) {
 	}
 }
 
+func TestWalkOnErrorUnreadableDir(t *testing.T) {
+	// walkErr path must invoke onError while still completing the walk.
+	root := t.TempDir()
+	good := filepath.Join(root, "good.go")
+	mustWrite(t, good, "package good")
+
+	badDir := filepath.Join(root, "locked")
+	mustWrite(t, filepath.Join(badDir, "secret.go"), "package secret")
+	if err := os.Chmod(badDir, 0); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(badDir, 0o755) })
+
+	if f, err := os.Open(badDir); err == nil {
+		f.Close()
+		t.Skip("unreadable dir still openable (root?); skip onError test")
+	}
+
+	var errPaths []string
+	onError := func(path string, err error) {
+		if err == nil {
+			t.Errorf("onError called with nil err for %q", path)
+		}
+		errPaths = append(errPaths, path)
+	}
+
+	files := make(chan string, 32)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Walk(context.Background(), root, ignore.New([]string{"go"}, nil), files, onError)
+		close(files)
+	}()
+
+	var got []string
+	for f := range files {
+		got = append(got, f)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+
+	if len(got) != 1 || got[0] != good {
+		t.Fatalf("paths = %v, want [%q]", got, good)
+	}
+	// WalkDir typically reports the locked directory itself.
+	found := false
+	for _, p := range errPaths {
+		if p == badDir || filepath.Base(p) == "locked" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("onError paths = %v, want one containing locked dir %q", errPaths, badDir)
+	}
+}
+
 func TestWalkRootNotPrunedByBasename(t *testing.T) {
 	// Default skip includes "bin"; walking a root named "bin" must still enter it.
 	root := filepath.Join(t.TempDir(), "bin")
@@ -204,7 +261,7 @@ func collectWalk(ctx context.Context, root string, filter Filter) ([]string, err
 	files := make(chan string, 32)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Walk(ctx, root, filter, files)
+		errCh <- Walk(ctx, root, filter, files, nil)
 		close(files)
 	}()
 

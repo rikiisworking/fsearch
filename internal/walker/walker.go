@@ -23,7 +23,11 @@ type Filter interface {
 // Walk walks root and sends regular file paths to files.
 // Symlinks are skipped. The caller owns files (Walk does not close it).
 // Walk stops early if ctx is cancelled.
-func Walk(ctx context.Context, root string, filter Filter, files chan<- string) error {
+//
+// onError is optional. When WalkDir reports an entry error (e.g. permission
+// denied), the walk continues but onError is called with that path and error
+// if non-nil. Cancel errors are returned from Walk, not reported via onError.
+func Walk(ctx context.Context, root string, filter Filter, files chan<- string, onError func(path string, err error)) error {
 	if filter == nil {
 		return fmt.Errorf("walker: filter is nil")
 	}
@@ -48,7 +52,10 @@ func Walk(ctx context.Context, root string, filter Filter, files chan<- string) 
 
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			// Unreadable entry: skip and keep going.
+			// Unreadable entry: report (optional) and keep going.
+			if onError != nil {
+				onError(path, walkErr)
+			}
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
 			}

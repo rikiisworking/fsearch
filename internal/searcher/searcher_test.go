@@ -750,3 +750,48 @@ func TestNewMatcherRegexFindAll(t *testing.T) {
 		t.Errorf("findAll = %v, want [[1 4]]", got)
 	}
 }
+
+func TestSearchOnFileDone(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.go"), "package a\n// TODO one\n// TODO two\n")
+	mustWrite(t, filepath.Join(root, "b.go"), "package b\n// no hit\n")
+	mustWrite(t, filepath.Join(root, "c.md"), "# TODO md\n") // filtered by ext
+
+	var (
+		mu    sync.Mutex
+		files []string
+		total int
+	)
+	got, err := collectSearch(context.Background(), Options{
+		Root:        root,
+		Keyword:     "TODO",
+		AllowedExts: []string{"go"},
+		Workers:     2,
+		OnFileDone: func(path string, matchCount int) {
+			mu.Lock()
+			files = append(files, filepath.Base(path))
+			total += matchCount
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("hits = %d, want 2", len(got))
+	}
+	if total != 2 {
+		t.Errorf("OnFileDone total matchCount = %d, want 2", total)
+	}
+	// a.go and b.go only (c.md filtered by walker, never reaches workers).
+	if len(files) != 2 {
+		t.Fatalf("OnFileDone files = %v, want 2", files)
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		seen[f] = true
+	}
+	if !seen["a.go"] || !seen["b.go"] {
+		t.Errorf("OnFileDone files = %v, want a.go and b.go", files)
+	}
+}

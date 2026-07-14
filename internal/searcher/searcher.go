@@ -73,6 +73,12 @@ type Options struct {
 	// returns ctx.Err() instead. Optional: nil = silent skip.
 	// May be called concurrently from the walker and from workers.
 	OnError func(path string, err error)
+
+	// OnFileDone is called after each file is processed (hits, misses, binary
+	// skip, or per-file I/O skip). matchCount is the number of line hits for
+	// that file (0 on miss/binary/I/O skip). Cancel is not reported here.
+	// Optional. May be called concurrently from workers.
+	OnFileDone func(path string, matchCount int)
 }
 
 // FileOptions configures a single-file search.
@@ -146,20 +152,26 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 	for i := 0; i < workers; i++ {
 		g.Go(func() error {
 			for path := range files {
-				err := searchFile(ctx, path, fileOpts, results, &emitMu)
+				n, err := searchFile(ctx, path, fileOpts, results, &emitMu)
 				if err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-					// Per-file I/O: skip + optional OnError.
+					// Per-file I/O: skip + optional OnError / OnFileDone.
 					var fe *fileOpError
 					if errors.As(err, &fe) {
 						if opts.OnError != nil {
 							opts.OnError(path, err)
 						}
+						if opts.OnFileDone != nil {
+							opts.OnFileDone(path, 0)
+						}
 						continue
 					}
 					return err
+				}
+				if opts.OnFileDone != nil {
+					opts.OnFileDone(path, n)
 				}
 			}
 			return nil
@@ -180,20 +192,24 @@ func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, er
 }
 
 // searchFile scans path and sends each hit to results (does not close results).
-// Binary files (NUL in the first 8KiB) return nil without sending.
+// Returns the number of matches sent (0 for binary/no hits).
+// Binary files (NUL in the first 8KiB) return 0, nil without sending.
 // When ContextLines == 0, scans line-by-line then batch-sends matches.
 // When > 0, buffers lines so Before/After can be filled on each Match.
 // If emitMu is non-nil, all matches for this file are sent under that lock so
 // they appear contiguously on results.
-func searchFile(ctx context.Context, path string, opts FileOptions, results chan<- Match, emitMu *sync.Mutex) error {
+func searchFile(ctx context.Context, path string, opts FileOptions, results chan<- Match, emitMu *sync.Mutex) (int, error) {
 	if results == nil {
-		return fmt.Errorf("searcher: results is nil")
+		return 0, fmt.Errorf("searcher: results is nil")
 	}
 	matches, err := scanFile(ctx, path, opts)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return sendMatches(ctx, results, matches, emitMu)
+	if err := sendMatches(ctx, results, matches, emitMu); err != nil {
+		return 0, err
+	}
+	return len(matches), nil
 }
 
 // scanFile opens path and returns all keyword/regex hits (no channel).

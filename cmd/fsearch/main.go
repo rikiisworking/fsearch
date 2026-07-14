@@ -34,6 +34,7 @@ func newRootCmd() *cobra.Command {
 		noColor      bool
 		regex        bool
 		jsonOut      bool
+		noProgress   bool
 	)
 
 	cmd := &cobra.Command{
@@ -47,6 +48,8 @@ With -e/--regex, the keyword is a Go RE2 regular expression.
 Output is grep-style (path:line:content). On a TTY, path/line/keyword are
 colored; use --no-color or pipe to disable. -C N adds N lines of context
 before and after each hit. --json emits one NDJSON object per match.
+Progress (files/matches) is shown on stderr when it is a TTY (not with --json);
+use --no-progress to disable.
 
 Examples:
   fsearch "TODO" .
@@ -60,7 +63,8 @@ Examples:
   fsearch "TODO" . --no-gitignore
   fsearch 'TODO|FIXME' . -e
   fsearch 'todo' . -e -i
-  fsearch "TODO" . --json`,
+  fsearch "TODO" . --json
+  fsearch "TODO" . --no-progress`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if contextLines < 0 {
@@ -82,7 +86,7 @@ Examples:
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
-			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(), noColor, jsonOut)
+			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(), noColor, jsonOut, noProgress)
 		},
 	}
 
@@ -95,6 +99,7 @@ Examples:
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	cmd.Flags().BoolVarP(&regex, "regex", "e", false, "treat keyword as a Go RE2 regular expression")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit one NDJSON object per match on stdout")
+	cmd.Flags().BoolVar(&noProgress, "no-progress", false, "disable progress indicator on stderr")
 	cmd.SilenceUsage = true
 
 	return cmd
@@ -127,12 +132,19 @@ type matchWriter interface {
 // If stderr is nil, warnings are discarded.
 // noColor forces plain human output (also auto-disabled for non-TTY via fatih/color).
 // jsonOut selects NDJSON (one object per match); colors are never applied in JSON mode.
-func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, noColor, jsonOut bool) error {
+// Progress is written to stderr when it is a TTY and not jsonOut / noProgress.
+func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, noColor, jsonOut, noProgress bool) error {
 	if stderr == nil {
 		stderr = io.Discard
 	}
 	opts.OnError = func(path string, err error) {
 		fmt.Fprintf(stderr, "fsearch: skip %s: %v\n", path, err)
+	}
+
+	var prog *progressWriter
+	if shouldShowProgress(stderr, jsonOut, noProgress) {
+		prog = newProgressWriter(stderr)
+		opts.OnFileDone = prog.fileDone
 	}
 
 	// Compile/validate regex once (same (?i) rules as searcher) before workers start.
@@ -184,7 +196,11 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, n
 		return printer.Flush(stdout)
 	})
 
-	return g.Wait()
+	err := g.Wait()
+	if prog != nil {
+		prog.finish()
+	}
+	return err
 }
 
 // parseList splits a comma-separated flag value into trimmed non-empty parts.

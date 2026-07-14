@@ -176,14 +176,14 @@ Sample run (`make bench`, Go test `-benchmem -benchtime=1s` on linux/amd64, Inte
 
 | Benchmark | ns/op | B/op | allocs/op |
 |-----------|------:|-----:|----------:|
-| `BenchmarkSearch` | ~1.55ms | ~3.6 MiB | ~10.7k |
-| `BenchmarkSearchWithContext` (`-C 1`) | ~2.03ms | ~4.1 MiB | ~12.0k |
+| `BenchmarkSearch` | ~1.84ms | ~3.6 MiB | ~10.7k |
+| `BenchmarkSearchWithContext` (`-C 1`) | ~2.43ms | ~4.1 MiB | ~12.0k |
 
 Numbers vary by CPU, GOMAXPROCS, and load. Re-run with `make bench` for local results. Raw example:
 
 ```text
-BenchmarkSearch-12                 687   1545096 ns/op  3619564 B/op  10663 allocs/op
-BenchmarkSearchWithContext-12      574   2028908 ns/op  4100741 B/op  11963 allocs/op
+BenchmarkSearch-12                 739   1837607 ns/op  3621331 B/op  10717 allocs/op
+BenchmarkSearchWithContext-12      445   2426592 ns/op  4102694 B/op  12017 allocs/op
 ```
 
 ## Project structure

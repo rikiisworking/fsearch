@@ -63,6 +63,8 @@ type Options struct {
 	Workers      int      // 0 = runtime.NumCPU()
 	IgnoreCase   bool     // false = case-sensitive (default)
 	ContextLines int      // lines of context before/after each hit; 0 = none
+	// Regex treats Keyword as a Go RE2 regular expression (literal match otherwise).
+	Regex bool
 	// NoGitignore skips loading root/.gitignore (defaults and --ignore still apply).
 	NoGitignore bool
 
@@ -77,7 +79,8 @@ type Options struct {
 type FileOptions struct {
 	Keyword      string
 	IgnoreCase   bool
-	ContextLines int // lines of context before/after each hit; 0 = none
+	ContextLines int  // lines of context before/after each hit; 0 = none
+	Regex        bool // treat Keyword as a Go RE2 regular expression
 }
 
 // Search walks Root and searches files concurrently for Keyword.
@@ -88,6 +91,10 @@ type FileOptions struct {
 func Search(ctx context.Context, opts Options, results chan<- Match) error {
 	if strings.TrimSpace(opts.Keyword) == "" {
 		return fmt.Errorf("searcher: keyword is required")
+	}
+	// Fail fast on bad regex before walk/workers start.
+	if _, err := newMatcher(opts.Keyword, opts.IgnoreCase, opts.Regex); err != nil {
+		return err
 	}
 	if opts.Root == "" {
 		opts.Root = "."
@@ -129,6 +136,7 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 		Keyword:      opts.Keyword,
 		IgnoreCase:   opts.IgnoreCase,
 		ContextLines: opts.ContextLines,
+		Regex:        opts.Regex,
 	}
 
 	// emitMu ensures all matches for one file are sent contiguously on results
@@ -161,10 +169,12 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 	return g.Wait()
 }
 
-// SearchFile scans path for literal keyword matches.
+// SearchFile scans path for keyword (or regex) matches.
 // Returns one Match per matching line. Line numbers are 1-based.
 // Binary files (NUL in the first 8KiB) return nil, nil.
 // When opts.ContextLines > 0, each Match includes Before/After context.
+// When opts.Regex is true, Keyword is compiled as a Go RE2 pattern;
+// invalid patterns return an error.
 func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, error) {
 	return scanFile(ctx, path, opts)
 }
@@ -186,11 +196,13 @@ func searchFile(ctx context.Context, path string, opts FileOptions, results chan
 	return sendMatches(ctx, results, matches, emitMu)
 }
 
-// scanFile opens path and returns all keyword hits (no channel).
+// scanFile opens path and returns all keyword/regex hits (no channel).
 // Binary files return (nil, nil). Keyword must be non-empty.
+// Invalid regex patterns return an error before scanning file contents.
 func scanFile(ctx context.Context, path string, opts FileOptions) ([]Match, error) {
-	if opts.Keyword == "" {
-		return nil, fmt.Errorf("searcher: keyword is required")
+	m, err := newMatcher(opts.Keyword, opts.IgnoreCase, opts.Regex)
+	if err != nil {
+		return nil, err
 	}
 
 	select {
@@ -218,19 +230,13 @@ func scanFile(ctx context.Context, path string, opts FileOptions) ([]Match, erro
 		return nil, fileErr("seek", path, err)
 	}
 
-	// Pre-lower keyword once when ignoring case.
-	keyword := opts.Keyword
-	if opts.IgnoreCase {
-		keyword = strings.ToLower(keyword)
-	}
-
 	// Context path: buffer whole file so each hit can get Before/After.
 	if opts.ContextLines > 0 {
 		lines, err := readAllLines(ctx, f, path)
 		if err != nil {
 			return nil, err
 		}
-		return collectContextMatches(ctx, path, lines, keyword, opts)
+		return collectContextMatches(ctx, path, lines, m, opts.ContextLines)
 	}
 
 	// Fast path: scan without full-file context buffers.
@@ -247,7 +253,7 @@ func scanFile(ctx context.Context, path string, opts FileOptions) ([]Match, erro
 			}
 		}
 		line := scanner.Text()
-		if !lineMatch(line, keyword, opts.IgnoreCase) {
+		if !m.match(line) {
 			continue
 		}
 		matches = append(matches, Match{
@@ -263,8 +269,8 @@ func scanFile(ctx context.Context, path string, opts FileOptions) ([]Match, erro
 }
 
 // collectContextMatches builds one Match per matching line with Before/After filled.
-func collectContextMatches(ctx context.Context, path string, lines []string, keyword string, opts FileOptions) ([]Match, error) {
-	n := opts.ContextLines
+func collectContextMatches(ctx context.Context, path string, lines []string, m matcher, contextLines int) ([]Match, error) {
+	n := contextLines
 	var matches []Match
 	for i, line := range lines {
 		if i%cancelCheckInterval == 0 {
@@ -274,7 +280,7 @@ func collectContextMatches(ctx context.Context, path string, lines []string, key
 			default:
 			}
 		}
-		if !lineMatch(line, keyword, opts.IgnoreCase) {
+		if !m.match(line) {
 			continue
 		}
 

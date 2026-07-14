@@ -90,7 +90,26 @@ Unreadable paths during walk or file open are skipped; a warning goes to stderr
 ```bash
 make test
 make cover
+make bench          # searcher benchmarks (override: BENCH=BenchmarkSearch BENCHTIME=2s)
 make clean
+```
+
+### Benchmarks (sample)
+
+Fixture (built once per benchmark): **50** `.go` files × **200** lines, a `TODO` hit every 20th line.
+
+Sample run (`make bench`, Go test `-benchmem -benchtime=1s` on linux/amd64, Intel i5-1335U):
+
+| Benchmark | ns/op | B/op | allocs/op |
+|-----------|------:|-----:|----------:|
+| `BenchmarkSearch` | ~1.55ms | ~3.6 MiB | ~10.7k |
+| `BenchmarkSearchWithContext` (`-C 1`) | ~2.03ms | ~4.1 MiB | ~12.0k |
+
+Numbers vary by CPU, GOMAXPROCS, and load. Re-run with `make bench` for local results. Raw example:
+
+```text
+BenchmarkSearch-12                 687   1545096 ns/op  3619564 B/op  10663 allocs/op
+BenchmarkSearchWithContext-12      574   2028908 ns/op  4100741 B/op  11963 allocs/op
 ```
 
 ## Project structure

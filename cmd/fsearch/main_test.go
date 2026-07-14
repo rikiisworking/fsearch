@@ -266,6 +266,44 @@ func TestCLISmokeContextNegative(t *testing.T) {
 	}
 }
 
+func TestCLISmokeWorkersNegative(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", ".", "--workers", "-1"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for negative workers")
+	}
+	if !strings.Contains(err.Error(), "workers must be >= 0") {
+		t.Errorf("error = %v, want workers validation message", err)
+	}
+}
+
+func TestCLISmokeWorkersOne(t *testing.T) {
+	// --workers 1 must still find hits (wiring reaches searcher.Options.Workers).
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "--workers", "1", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "TODO here") {
+		t.Errorf("--workers 1 output missing hit: %q", out.String())
+	}
+}
+
 func TestCLISmokeNoColor(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "a.go")

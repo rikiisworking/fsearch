@@ -56,11 +56,11 @@ A fast, user-friendly CLI tool that searches for keywords inside files recursive
 - Colored output (fatih/color): path, line number, keyword highlight
 - Pretty formatting of results (grep-style context + separators)
 
-### Sprint 3: Performance & Robustness
-- `.gitignore` support
-- Worker pool / better concurrency control
-- Benchmarks
-- Error handling polish
+### Sprint 3: Performance & Robustness ✅
+- `.gitignore` support (root file, MVP rule subset, `--no-gitignore`)
+- Worker pool / better concurrency control (`--workers`)
+- Benchmarks (`make bench`)
+- Error handling polish (walk + file skip warnings on stderr)
 
 ### Sprint 4: Polish & Extra Features
 - JSON output

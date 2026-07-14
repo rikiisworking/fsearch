@@ -4,7 +4,7 @@ Fast recursive file content search for the Linux shell.
 
 Modern, concurrent alternative to classic `grep` / `find` combos.
 
-> **Status:** Sprint 2 — CLI flags, context lines, and colored output work.
+> **Status:** Sprint 3 — `.gitignore`, `--workers`, benchmarks, walk skip warnings.
 
 ## Requirements
 
@@ -52,7 +52,12 @@ fsearch --help
 
 # Force plain text (also automatic when piped / NO_COLOR)
 ./bin/fsearch "TODO" . --no-color
+
+# Skip loading root .gitignore (built-in skips and --ignore still apply)
+./bin/fsearch "TODO" . --no-gitignore
 ```
+
+Root `.gitignore` is loaded automatically when present (MVP subset of git rules).
 
 ### Output format
 
@@ -83,6 +88,7 @@ Unreadable paths during walk or file open are skipped; a warning goes to stderr
 | `-i`, `--ignore-case` | case-insensitive search (default: case-sensitive) |
 | `-C`, `--context N` | N lines of context before and after each match |
 | `--workers N` | concurrent file-search workers (`0` = `NumCPU`, default) |
+| `--no-gitignore` | do not load root `.gitignore` |
 | `--no-color` | disable colored output |
 
 ## Develop

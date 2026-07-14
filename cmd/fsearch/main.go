@@ -51,7 +51,9 @@ Examples:
   fsearch "todo" . -i
   fsearch "TODO" . -C 2
   fsearch "TODO" . --ext go,md -C 1 -i
-  fsearch "TODO" . --no-color`,
+  fsearch "TODO" . --no-color
+  fsearch "TODO" . --workers 4
+  fsearch "TODO" . --no-gitignore`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if contextLines < 0 {

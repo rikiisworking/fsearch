@@ -8,7 +8,7 @@ Modern, concurrent alternative to classic `grep` / `find` combos.
 
 ## Requirements
 
-- Go 1.22+ (tested with Go 1.26)
+- Go 1.25+ (module line in `go.mod`; tested with Go 1.26)
 - Linux
 
 ## Build
@@ -55,9 +55,12 @@ fsearch --help
 
 # Skip loading root .gitignore (built-in skips and --ignore still apply)
 ./bin/fsearch "TODO" . --no-gitignore
+
+# Limit concurrent file-search workers (0 = NumCPU)
+./bin/fsearch "TODO" . --workers 4
 ```
 
-Root `.gitignore` is loaded automatically when present (MVP subset of git rules).
+Root `.gitignore` is loaded automatically when present (root file only; MVP rule subset — see [Known limitations](#known-limitations)).
 
 ### Output format
 
@@ -90,6 +93,13 @@ Unreadable paths during walk or file open are skipped; a warning goes to stderr
 | `--workers N` | concurrent file-search workers (`0` = `NumCPU`, default) |
 | `--no-gitignore` | do not load root `.gitignore` |
 | `--no-color` | disable colored output |
+
+### Known limitations
+
+- **Root `.gitignore` only** — only `Root/.gitignore` is loaded (no nested `.gitignore`). Rules are an MVP subset: `#` comments, `!` negation (last match wins), trailing `/` (directories only), leading `/` (anchored to root), and basic globs via `filepath.Match`. Not full git semantics (no `**` parity, escaped spaces, etc.).
+- **Built-in directory skips always apply** — common junk dirs (e.g. `.git`, `node_modules`, `vendor`, `bin`, build/cache/IDE dirs) are pruned even when `.gitignore` is absent or `--no-gitignore` is set. They are separate from `--ignore`. There is no flag to disable the defaults.
+- **Match order** across files is not sorted; hits stream as workers finish. Matches from a single file stay in line order and contiguous for context coalescing.
+- **Binary skip** — files with a NUL byte in the first 8KiB are not searched.
 
 ## Develop
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -99,6 +100,16 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 	}
 
 	filter := ignore.New(opts.AllowedExts, opts.SkipPatterns)
+	// Load root .gitignore when present (missing file is not an error).
+	giPath := filepath.Join(opts.Root, ".gitignore")
+	if gi, err := ignore.LoadGitignoreFile(giPath); err != nil {
+		// Non-missing I/O failure: surface via OnError if set, else ignore quietly.
+		if opts.OnError != nil {
+			opts.OnError(giPath, err)
+		}
+	} else if gi != nil {
+		filter.SetGitignore(opts.Root, gi)
+	}
 	files := make(chan string, workers*2)
 
 	g, ctx := errgroup.WithContext(ctx)

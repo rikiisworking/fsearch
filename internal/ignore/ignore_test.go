@@ -1,6 +1,9 @@
 package ignore
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestSkipDirDefaults(t *testing.T) {
 	// No custom patterns — only built-in defaultSkipDirs.
@@ -31,7 +34,7 @@ func TestSkipDirDefaults(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := m.SkipDir(tt.name); got != tt.want {
+			if got := m.SkipDir(tt.name, tt.name); got != tt.want {
 				t.Errorf("SkipDir(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
@@ -66,7 +69,7 @@ func TestSkipDirPatterns(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := m.SkipDir(tt.dir); got != tt.want {
+			if got := m.SkipDir(tt.dir, tt.dir); got != tt.want {
 				t.Errorf("SkipDir(%q) = %v, want %v", tt.dir, got, tt.want)
 			}
 		})
@@ -114,5 +117,28 @@ func TestIncludeFile(t *testing.T) {
 					tt.path, got, tt.want, tt.allowedExts, tt.skipPatterns)
 			}
 		})
+	}
+}
+
+func TestMatcherGitignore(t *testing.T) {
+	root := t.TempDir()
+	m := New([]string{"go"}, nil)
+	m.SetGitignore(root, NewGitignore(ParseGitignore("*.log\nsecret/\n")))
+
+	// Absolute paths as walker would pass.
+	logPath := filepath.Join(root, "debug.log")
+	if m.IncludeFile(logPath) {
+		t.Errorf("IncludeFile(%q) = true, want false (gitignore *.log)", logPath)
+	}
+
+	// Dir-only rule prunes the directory (children never walked).
+	secretDir := filepath.Join(root, "secret")
+	if !m.SkipDir(secretDir, "secret") {
+		t.Errorf("SkipDir(secret) = false, want true")
+	}
+
+	okGo := filepath.Join(root, "main.go")
+	if !m.IncludeFile(okGo) {
+		t.Errorf("IncludeFile(%q) = false, want true", okGo)
 	}
 }

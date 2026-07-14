@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -314,6 +315,34 @@ func TestSearch(t *testing.T) {
 		if m.Path == "" {
 			t.Errorf("empty path: %+v", m)
 		}
+	}
+}
+
+func TestSearchGitignore(t *testing.T) {
+	// Root .gitignore should hide matching paths from Search.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".gitignore"), "*.skip\nhidden/\n")
+	mustWrite(t, filepath.Join(root, "keep.go"), "package keep\n// TODO visible\n")
+	mustWrite(t, filepath.Join(root, "noise.skip"), "package noise\n// TODO hidden by gitignore\n")
+	mustWrite(t, filepath.Join(root, "hidden", "x.go"), "package hidden\n// TODO in ignored dir\n")
+
+	got, err := collectSearch(context.Background(), Options{
+		Root:        root,
+		Keyword:     "TODO",
+		AllowedExts: []string{"go", "skip"}, // allow .skip ext so only gitignore hides it
+		Workers:     2,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d matches, want 1 (only keep.go): %+v", len(got), got)
+	}
+	if !strings.Contains(got[0].Path, "keep.go") {
+		t.Errorf("hit path = %q, want keep.go", got[0].Path)
+	}
+	if !strings.Contains(got[0].Content, "visible") {
+		t.Errorf("content = %q, want visible hit", got[0].Content)
 	}
 }
 

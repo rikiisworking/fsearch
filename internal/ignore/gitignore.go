@@ -1,6 +1,8 @@
 package ignore
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -120,6 +122,21 @@ func (g *Gitignore) Match(path string, isDir bool) bool {
 		ignored = !r.Negate
 	}
 	return ignored
+}
+
+// LoadGitignoreFile reads path, parses it as a .gitignore, and returns a
+// Gitignore matcher. If the file does not exist, returns (nil, nil) so callers
+// can treat a missing file as "no gitignore rules".
+// Other I/O errors are wrapped and returned.
+func LoadGitignoreFile(path string) (*Gitignore, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ignore: read gitignore %s: %w", path, err)
+	}
+	return NewGitignore(ParseGitignore(string(data))), nil
 }
 
 // ParseGitignore parses .gitignore file content into rules (in file order).

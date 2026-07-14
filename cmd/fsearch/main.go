@@ -24,8 +24,11 @@ func main() {
 
 func newRootCmd() *cobra.Command {
 	var (
-		exts    string
-		ignores []string
+		exts         string
+		ignores      []string
+		ignoreCase   bool
+		contextLines int
+		noColor      bool
 	)
 
 	cmd := &cobra.Command{
@@ -34,35 +37,50 @@ func newRootCmd() *cobra.Command {
 		Long: `fsearch searches for a keyword inside file contents under a path
 (recursively, including child directories).
 
+Matching is case-sensitive by default; use -i/--ignore-case to ignore case.
+Output is grep-style (path:line:content). On a TTY, path/line/keyword are
+colored; use --no-color or pipe to disable. -C N adds N lines of context
+before and after each hit.
+
 Examples:
   fsearch "TODO" .
   fsearch "TODO" . --ext go,md
-  fsearch "FIXME" ./internal --ignore vendor`,
+  fsearch "FIXME" ./internal --ignore vendor
+  fsearch "todo" . -i
+  fsearch "TODO" . -C 2
+  fsearch "TODO" . --ext go,md -C 1 -i
+  fsearch "TODO" . --no-color`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if contextLines < 0 {
+				return fmt.Errorf("context must be >= 0, got %d", contextLines)
+			}
 			keyword := args[0]
 			root := "."
 			if len(args) > 1 {
 				root = args[1]
 			}
-			opts := buildOptions(keyword, root, exts, ignores)
+			opts := buildOptions(keyword, root, exts, ignores, ignoreCase, contextLines)
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
-			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(), noColor)
 		},
 	}
 
 	cmd.Flags().StringVar(&exts, "ext", "", "comma-separated file extensions to include (e.g. go,md)")
 	cmd.Flags().StringArrayVar(&ignores, "ignore", nil, "basename or pattern to ignore (repeatable)")
+	cmd.Flags().BoolVarP(&ignoreCase, "ignore-case", "i", false, "case-insensitive search")
+	cmd.Flags().IntVarP(&contextLines, "context", "C", 0, "lines of context before and after each match")
+	cmd.Flags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	cmd.SilenceUsage = true
 
 	return cmd
 }
 
 // buildOptions turns CLI args/flags into searcher.Options.
-func buildOptions(keyword, root, exts string, ignores []string) searcher.Options {
+func buildOptions(keyword, root, exts string, ignores []string, ignoreCase bool, contextLines int) searcher.Options {
 	var skip []string
 	for _, ig := range ignores {
 		skip = append(skip, parseList(ig)...)
@@ -72,12 +90,15 @@ func buildOptions(keyword, root, exts string, ignores []string) searcher.Options
 		Keyword:      keyword,
 		AllowedExts:  parseList(exts),
 		SkipPatterns: skip,
+		IgnoreCase:   ignoreCase,
+		ContextLines: contextLines,
 	}
 }
 
 // run executes search: hits go to stdout, skip warnings to stderr.
 // If stderr is nil, warnings are discarded.
-func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer) error {
+// noColor forces plain output (also auto-disabled for non-TTY via fatih/color).
+func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, noColor bool) error {
 	if stderr == nil {
 		stderr = io.Discard
 	}
@@ -95,13 +116,19 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer) e
 	})
 
 	// Consumer: single writer to stdout (no mutex needed).
+	printer := &output.Printer{
+		Keyword:    opts.Keyword,
+		IgnoreCase: opts.IgnoreCase,
+		NoColor:    noColor,
+	}
 	g.Go(func() error {
 		for m := range results {
-			if err := output.WriteMatch(stdout, m); err != nil {
+			if err := printer.WriteMatch(stdout, m); err != nil {
 				return err
 			}
 		}
-		return nil
+		// Flush coalesced context groups buffered by the printer.
+		return printer.Flush(stdout)
 	})
 
 	return g.Wait()

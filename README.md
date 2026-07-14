@@ -4,7 +4,7 @@ Fast recursive file content search for the Linux shell.
 
 Modern, concurrent alternative to classic `grep` / `find` combos.
 
-> **Status:** Sprint 1 — core search works. Color/pretty output lands in Sprint 2.
+> **Status:** Sprint 2 — CLI flags, context lines, and colored output work.
 
 ## Requirements
 
@@ -40,14 +40,46 @@ fsearch --help
 
 # Extra basename ignores (repeatable)
 ./bin/fsearch "FIXME" ./internal --ignore vendor --ignore '*.min.js'
+
+# Case-insensitive
+./bin/fsearch "todo" . -i
+
+# One line of context before/after each hit
+./bin/fsearch "TODO" . --ext go -C 1
+
+# Combined
+./bin/fsearch "TODO" . --ext go,md -C 1 -i
+
+# Force plain text (also automatic when piped / NO_COLOR)
+./bin/fsearch "TODO" . --no-color
 ```
 
-Output is grep-style: `path:line:content`
+### Output format
+
+Hits are grep-style: `path:line:content`
+
+With context (`-C N`):
+
+```
+path-line-before
+path:line:hit content
+path-line-after
+--
+path:line:next hit
+```
+
+Overlapping or adjacent context groups on the same file are coalesced (no
+duplicate lines, no mid-group `--`), like grep.
+
+On a TTY, path is magenta, line numbers green, and the keyword bold red on hit lines. Colors are off when piped, when `NO_COLOR` is set, or with `--no-color`.
 
 | Flag | Meaning |
 |------|---------|
 | `--ext go,md` | only these extensions (empty = all) |
 | `--ignore PAT` | skip basenames matching PAT (exact or glob; repeatable) |
+| `-i`, `--ignore-case` | case-insensitive search (default: case-sensitive) |
+| `-C`, `--context N` | N lines of context before and after each match |
+| `--no-color` | disable colored output |
 
 ## Develop
 
@@ -67,7 +99,7 @@ fsearch/
 │   ├── searcher/            # Orchestrates walk + concurrent file matching
 │   ├── walker/              # filepath.WalkDir → file path channel
 │   ├── ignore/              # Extension allow-list + basename skip rules
-│   └── output/              # Grep-style result formatting
+│   └── output/              # Grep-style + colored formatting
 ├── bin/                     # Built binary (make build)
 ├── Makefile
 ├── go.mod / go.sum
@@ -82,7 +114,7 @@ fsearch/
 | `internal/searcher` | Coordinates workers; opens files and finds keyword hits by line |
 | `internal/walker` | Walks the tree (skips symlinks); yields regular file paths |
 | `internal/ignore` | Default dir skips (`.git`, `node_modules`, …) + `--ext` / `--ignore` |
-| `internal/output` | Formats each hit as `path:line:content` |
+| `internal/output` | Formats hits (context, colors, keyword highlight) |
 
 ### Architecture
 
@@ -91,13 +123,13 @@ Packages stay small and one-way: the CLI depends on `searcher` and `output`; `se
 ```mermaid
 flowchart TB
   CLI["cmd/fsearch<br/>cobra + signals"]
-  OUT["internal/output<br/>path:line:content"]
+  OUT["internal/output<br/>Printer + colors"]
   S["internal/searcher<br/>errgroup + workers"]
   W["internal/walker<br/>WalkDir → channel"]
   I["internal/ignore<br/>Filter"]
 
   CLI -->|"Search(opts, emit)"| S
-  CLI -->|"WriteMatch(...)"| OUT
+  CLI -->|"Printer.WriteMatch(...)"| OUT
   S -->|"Walk(root, filter, files)"| W
   S -->|"New(exts, patterns)"| I
   W -.->|"implements Filter"| I
@@ -118,14 +150,14 @@ sequenceDiagram
   participant Workers as worker pool
   participant Out as output
 
-  User->>CLI: fsearch "TODO" . --ext go
+  User->>CLI: fsearch "TODO" . --ext go -C 1 -i
   CLI->>Searcher: Search(ctx, Options, emit)
   Searcher->>Walker: Walk → files channel
   loop each file path
     Walker-->>Workers: path
-    Workers->>Workers: SearchFile(keyword)
+    Workers->>Workers: SearchFile(keyword, context)
     Workers-->>CLI: emit(Match)
-    CLI->>Out: WriteMatch → stdout
+    CLI->>Out: Printer.WriteMatch → stdout
   end
   Searcher-->>CLI: done / error
   CLI-->>User: exit status
@@ -146,7 +178,7 @@ flowchart LR
     W2["worker 2"]
     Wn["worker N"]
   end
-  Out["emit → stdout<br/>(mutex)"]
+  Out["emit → stdout<br/>(single writer)"]
 
   Walk --> Ch
   Ch --> W1 & W2 & Wn
@@ -156,7 +188,7 @@ flowchart LR
 1. **Producer** — one goroutine walks the tree and pushes paths into a buffered channel.
 2. **Consumers** — `Workers` (or `runtime.NumCPU()`) goroutines read paths, scan file contents, and emit matches.
 3. **Cancel** — `context` from Ctrl+C stops the walk and workers via `errgroup`.
-4. **Emit** — match callbacks are serialized with a mutex so stdout stays line-safe.
+4. **Emit** — a single consumer goroutine writes matches to stdout (line-safe without a mutex).
 
 ## Docs
 

@@ -38,12 +38,14 @@ func TestParseList(t *testing.T) {
 
 func TestBuildOptions(t *testing.T) {
 	tests := []struct {
-		name     string
-		keyword  string
-		root     string
-		exts     string
-		ignores  []string
-		wantOpts searcher.Options
+		name         string
+		keyword      string
+		root         string
+		exts         string
+		ignores      []string
+		ignoreCase   bool
+		contextLines int
+		wantOpts     searcher.Options
 	}{
 		{
 			name:    "defaults",
@@ -78,11 +80,33 @@ func TestBuildOptions(t *testing.T) {
 				SkipPatterns: []string{"a", "b", "c"},
 			},
 		},
+		{
+			name:       "ignore-case",
+			keyword:    "todo",
+			root:       ".",
+			ignoreCase: true,
+			wantOpts: searcher.Options{
+				Root:       ".",
+				Keyword:    "todo",
+				IgnoreCase: true,
+			},
+		},
+		{
+			name:         "context lines",
+			keyword:      "TODO",
+			root:         ".",
+			contextLines: 2,
+			wantOpts: searcher.Options{
+				Root:         ".",
+				Keyword:      "TODO",
+				ContextLines: 2,
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores)
+			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores, tt.ignoreCase, tt.contextLines)
 			if !reflect.DeepEqual(got, tt.wantOpts) {
 				t.Errorf("buildOptions() = %#v, want %#v", got, tt.wantOpts)
 			}
@@ -153,6 +177,175 @@ func TestCLISmokeMissingArgs(t *testing.T) {
 
 	if err := cmd.Execute(); err == nil {
 		t.Errorf("expected error for missing args")
+	}
+}
+
+func TestCLISmokeIgnoreCase(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Case-sensitive (default): lowercase keyword misses TODO
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"todo", root, "--ext", "go"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute (sensitive): %v\nout=%q", err, out.String())
+	}
+	if got := out.String(); got != "" {
+		t.Errorf("case-sensitive want empty, got %q", got)
+	}
+
+	// Ignore-case: should hit
+	out.Reset()
+	cmd = newRootCmd()
+	cmd.SetArgs([]string{"todo", root, "--ext", "go", "-i"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute (-i): %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "TODO here") {
+		t.Errorf("-i output missing hit: %q", out.String())
+	}
+}
+
+func TestCLISmokeContext(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	// line1 package, line2 blank-ish comment prev, line3 TODO, line4 next
+	content := "package a\n// prev\n// TODO here\n// next\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "-C", "1", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+
+	got := out.String()
+	// Hit line uses :
+	if !strings.Contains(got, ":3:// TODO here") && !strings.Contains(got, path+":3:// TODO here") {
+		// path may be absolute; check line:content form
+		if !strings.Contains(got, ":3:// TODO here") {
+			t.Errorf("missing hit line: %q", got)
+		}
+	}
+	// Context lines use -
+	if !strings.Contains(got, "-2-// prev") {
+		t.Errorf("missing before context: %q", got)
+	}
+	if !strings.Contains(got, "-4-// next") {
+		t.Errorf("missing after context: %q", got)
+	}
+}
+
+func TestCLISmokeContextNegative(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", ".", "-C", "-1"})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for negative context")
+	}
+	if !strings.Contains(err.Error(), "context must be >= 0") {
+		t.Errorf("error = %v, want context validation message", err)
+	}
+}
+
+func TestCLISmokeNoColor(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a.go")
+	if err := os.WriteFile(path, []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "TODO here") {
+		t.Errorf("missing hit: %q", got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("unexpected ANSI codes with --no-color: %q", got)
+	}
+}
+
+func TestCLISmokeIgnore(t *testing.T) {
+	root := t.TempDir()
+	// Keyword only under ignored basename path.
+	if err := os.WriteFile(filepath.Join(root, "keep.go"), []byte("package keep\n// no hit\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile keep: %v", err)
+	}
+	secretDir := filepath.Join(root, "secret")
+	if err := os.MkdirAll(secretDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "a.go"), []byte("package secret\n// TODO hidden\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile secret: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go", "--ignore", "secret"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	if got := out.String(); got != "" {
+		t.Errorf("want empty output when hit is under --ignore, got %q", got)
+	}
+}
+
+func TestCLISmokeDefaultPath(t *testing.T) {
+	// Keyword-only args should search under "." (current working directory).
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", "--ext", "go", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "TODO here") {
+		t.Errorf("default path output missing hit: %q", out.String())
 	}
 }
 

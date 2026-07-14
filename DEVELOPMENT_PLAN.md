@@ -51,10 +51,10 @@ A fast, user-friendly CLI tool that searches for keywords inside files recursive
 - Basic ignore + extension filtering
 - Unit tests
 
-### Sprint 2: CLI Experience & Output
-- Full flags (path, keyword, --ext, --ignore, --context, --case-sensitive, etc.)
-- Colored output (fatih/color)
-- Pretty formatting of results
+### Sprint 2: CLI Experience & Output ✅
+- Full flags (`--ext`, `--ignore`, `-i`/`--ignore-case`, `-C`/`--context`, `--no-color`)
+- Colored output (fatih/color): path, line number, keyword highlight
+- Pretty formatting of results (grep-style context + separators)
 
 ### Sprint 3: Performance & Robustness
 - `.gitignore` support

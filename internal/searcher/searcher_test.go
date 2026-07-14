@@ -2,6 +2,7 @@ package searcher
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -38,8 +39,175 @@ func TestSearchFileHits(t *testing.T) {
 		t.Errorf("content = %q", matches[0].Content)
 	}
 	if matches[0].Before != nil || matches[0].After != nil {
-		t.Errorf("context slices should be empty for now: %+v", matches[0])
+		t.Errorf("context slices should be empty when ContextLines=0: %+v", matches[0])
 	}
+}
+
+func TestSearchFileContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	// lines: 1=alpha, 2=beta, 3=HIT one, 4=gamma, 5=HIT two, 6=delta
+	content := "alpha\nbeta\nHIT one\ngamma\nHIT two\ndelta\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		n       int
+		wantLen int
+		check   func(t *testing.T, matches []Match)
+	}{
+		{
+			name:    "N=0 empty context",
+			n:       0,
+			wantLen: 2,
+			check: func(t *testing.T, matches []Match) {
+				for _, m := range matches {
+					if m.Before != nil || m.After != nil {
+						t.Errorf("want nil context, got Before=%v After=%v", m.Before, m.After)
+					}
+				}
+			},
+		},
+		{
+			name:    "N=1 middle hits",
+			n:       1,
+			wantLen: 2,
+			check: func(t *testing.T, matches []Match) {
+				if matches[0].Line != 3 || matches[0].Content != "HIT one" {
+					t.Errorf("match0 = %+v", matches[0])
+				}
+				if !equalStrings(matches[0].Before, []string{"beta"}) {
+					t.Errorf("match0 Before = %v, want [beta]", matches[0].Before)
+				}
+				if !equalStrings(matches[0].After, []string{"gamma"}) {
+					t.Errorf("match0 After = %v, want [gamma]", matches[0].After)
+				}
+				if matches[1].Line != 5 {
+					t.Errorf("match1 line = %d", matches[1].Line)
+				}
+				if !equalStrings(matches[1].Before, []string{"gamma"}) {
+					t.Errorf("match1 Before = %v, want [gamma]", matches[1].Before)
+				}
+				if !equalStrings(matches[1].After, []string{"delta"}) {
+					t.Errorf("match1 After = %v, want [delta]", matches[1].After)
+				}
+			},
+		},
+		{
+			name:    "N larger than file clamps",
+			n:       100,
+			wantLen: 2,
+			check: func(t *testing.T, matches []Match) {
+				if !equalStrings(matches[0].Before, []string{"alpha", "beta"}) {
+					t.Errorf("match0 Before = %v", matches[0].Before)
+				}
+				if !equalStrings(matches[0].After, []string{"gamma", "HIT two", "delta"}) {
+					t.Errorf("match0 After = %v", matches[0].After)
+				}
+				if !equalStrings(matches[1].Before, []string{"alpha", "beta", "HIT one", "gamma"}) {
+					t.Errorf("match1 Before = %v", matches[1].Before)
+				}
+				if !equalStrings(matches[1].After, []string{"delta"}) {
+					t.Errorf("match1 After = %v", matches[1].After)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matches, err := SearchFile(context.Background(), path, FileOptions{
+				Keyword:      "HIT",
+				ContextLines: tt.n,
+			})
+			if err != nil {
+				t.Fatalf("SearchFile: %v", err)
+			}
+			if len(matches) != tt.wantLen {
+				t.Fatalf("got %d matches, want %d: %+v", len(matches), tt.wantLen, matches)
+			}
+			tt.check(t, matches)
+		})
+	}
+}
+
+func TestSearchFileContextEdges(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "edges.txt")
+	// HIT on first and last line
+	if err := os.WriteFile(path, []byte("HIT first\nmiddle\nHIT last\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	matches, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword:      "HIT",
+		ContextLines: 1,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("got %d matches, want 2", len(matches))
+	}
+
+	// first line: empty Before, After = middle
+	if matches[0].Line != 1 {
+		t.Errorf("match0 line = %d", matches[0].Line)
+	}
+	if len(matches[0].Before) != 0 {
+		t.Errorf("match0 Before = %v, want empty", matches[0].Before)
+	}
+	if !equalStrings(matches[0].After, []string{"middle"}) {
+		t.Errorf("match0 After = %v", matches[0].After)
+	}
+
+	// last line: Before = middle, empty After
+	if matches[1].Line != 3 {
+		t.Errorf("match1 line = %d", matches[1].Line)
+	}
+	if !equalStrings(matches[1].Before, []string{"middle"}) {
+		t.Errorf("match1 Before = %v", matches[1].Before)
+	}
+	if len(matches[1].After) != 0 {
+		t.Errorf("match1 After = %v, want empty", matches[1].After)
+	}
+}
+
+func TestSearchFileContextIgnoreCase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("prev\ntodo mid\nnext\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	matches, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword:      "TODO",
+		IgnoreCase:   true,
+		ContextLines: 1,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("got %d matches, want 1", len(matches))
+	}
+	if !equalStrings(matches[0].Before, []string{"prev"}) || !equalStrings(matches[0].After, []string{"next"}) {
+		t.Errorf("context = Before=%v After=%v", matches[0].Before, matches[0].After)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestSearchFileNoMatch(t *testing.T) {
@@ -160,6 +328,127 @@ func TestSearchNilResults(t *testing.T) {
 	err := Search(context.Background(), Options{Root: ".", Keyword: "x"}, nil)
 	if err == nil {
 		t.Errorf("expected error for nil results")
+	}
+}
+
+func TestSearchContextCancel(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.go"), "package a\n// TODO here\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := collectSearch(ctx, Options{
+		Root:    root,
+		Keyword: "TODO",
+		Workers: 2,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Search error = %v, want context.Canceled", err)
+	}
+}
+
+func TestSearchDefaultRoot(t *testing.T) {
+	// Empty Root should default to "."; use a temp cwd so we don't scan the repo.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.go"), "package a\n// TODO here\n")
+
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	got, err := collectSearch(context.Background(), Options{
+		Root:        "", // defaults to "."
+		Keyword:     "TODO",
+		AllowedExts: []string{"go"},
+		Workers:     1,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d matches, want 1: %+v", len(got), got)
+	}
+}
+
+func TestSearchWorkersDefault(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.go"), "package a\n// TODO here\n")
+
+	// Workers <= 0 uses runtime.NumCPU(); ensure no panic/deadlock and a hit.
+	got, err := collectSearch(context.Background(), Options{
+		Root:    root,
+		Keyword: "TODO",
+		Workers: 0,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d matches, want 1: %+v", len(got), got)
+	}
+}
+
+func TestSearchWithContextLines(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.go"), "package a\n// prev\n// TODO here\n// next\n")
+
+	got, err := collectSearch(context.Background(), Options{
+		Root:         root,
+		Keyword:      "TODO",
+		AllowedExts:  []string{"go"},
+		Workers:      1,
+		ContextLines: 1,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d matches, want 1: %+v", len(got), got)
+	}
+	m := got[0]
+	if m.Line != 3 || m.Content != "// TODO here" {
+		t.Errorf("match = %+v", m)
+	}
+	if !equalStrings(m.Before, []string{"// prev"}) {
+		t.Errorf("Before = %v, want [// prev]", m.Before)
+	}
+	if !equalStrings(m.After, []string{"// next"}) {
+		t.Errorf("After = %v, want [// next]", m.After)
+	}
+}
+
+func TestSearchFileEmptyAndNoTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+
+	emptyPath := filepath.Join(dir, "empty.txt")
+	if err := os.WriteFile(emptyPath, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile empty: %v", err)
+	}
+	got, err := SearchFile(context.Background(), emptyPath, FileOptions{Keyword: "TODO"})
+	if err != nil {
+		t.Fatalf("empty SearchFile: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("empty: got %v, want none", got)
+	}
+
+	// Last line without trailing newline still matches.
+	noNL := filepath.Join(dir, "nonewline.txt")
+	if err := os.WriteFile(noNL, []byte("hello\n// TODO last"), 0o644); err != nil {
+		t.Fatalf("WriteFile noNL: %v", err)
+	}
+	got, err = SearchFile(context.Background(), noNL, FileOptions{Keyword: "TODO"})
+	if err != nil {
+		t.Fatalf("noNL SearchFile: %v", err)
+	}
+	if len(got) != 1 || got[0].Line != 2 || got[0].Content != "// TODO last" {
+		t.Fatalf("noNL: got %+v, want line 2 '// TODO last'", got)
 	}
 }
 

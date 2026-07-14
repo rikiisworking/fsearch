@@ -166,24 +166,7 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 // Binary files (NUL in the first 8KiB) return nil, nil.
 // When opts.ContextLines > 0, each Match includes Before/After context.
 func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, error) {
-	results := make(chan Match, 32)
-	var matches []Match
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for m := range results {
-			matches = append(matches, m)
-		}
-	}()
-
-	err := searchFile(ctx, path, opts, results, nil)
-	close(results)
-	wg.Wait()
-	if err != nil {
-		return nil, err
-	}
-	return matches, nil
+	return scanFile(ctx, path, opts)
 }
 
 // searchFile scans path and sends each hit to results (does not close results).
@@ -193,22 +176,32 @@ func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, er
 // If emitMu is non-nil, all matches for this file are sent under that lock so
 // they appear contiguously on results.
 func searchFile(ctx context.Context, path string, opts FileOptions, results chan<- Match, emitMu *sync.Mutex) error {
-	if opts.Keyword == "" {
-		return fmt.Errorf("searcher: keyword is required")
-	}
 	if results == nil {
 		return fmt.Errorf("searcher: results is nil")
+	}
+	matches, err := scanFile(ctx, path, opts)
+	if err != nil {
+		return err
+	}
+	return sendMatches(ctx, results, matches, emitMu)
+}
+
+// scanFile opens path and returns all keyword hits (no channel).
+// Binary files return (nil, nil). Keyword must be non-empty.
+func scanFile(ctx context.Context, path string, opts FileOptions) ([]Match, error) {
+	if opts.Keyword == "" {
+		return nil, fmt.Errorf("searcher: keyword is required")
 	}
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	default:
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return fileErr("open", path, err)
+		return nil, fileErr("open", path, err)
 	}
 	defer f.Close()
 
@@ -216,13 +209,13 @@ func searchFile(ctx context.Context, path string, opts FileOptions, results chan
 	head := make([]byte, binaryCheckSize)
 	n, err := f.Read(head)
 	if err != nil && err != io.EOF {
-		return fileErr("read", path, err)
+		return nil, fileErr("read", path, err)
 	}
 	if bytes.IndexByte(head[:n], 0) >= 0 {
-		return nil // binary: no matches, not an error
+		return nil, nil // binary: no matches, not an error
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return fileErr("seek", path, err)
+		return nil, fileErr("seek", path, err)
 	}
 
 	// Pre-lower keyword once when ignoring case.
@@ -231,30 +224,25 @@ func searchFile(ctx context.Context, path string, opts FileOptions, results chan
 		keyword = strings.ToLower(keyword)
 	}
 
-	var matches []Match
-
 	// Context path: buffer whole file so each hit can get Before/After.
 	if opts.ContextLines > 0 {
 		lines, err := readAllLines(ctx, f, path)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		matches, err = collectContextMatches(ctx, path, lines, keyword, opts)
-		if err != nil {
-			return err
-		}
-		return sendMatches(ctx, results, matches, emitMu)
+		return collectContextMatches(ctx, path, lines, keyword, opts)
 	}
 
-	// Fast path: scan without full-file context buffers, then emit together.
+	// Fast path: scan without full-file context buffers.
 	scanner := newLineScanner(f)
 	lineNum := 0
+	var matches []Match
 	for scanner.Scan() {
 		lineNum++
 		if lineNum%cancelCheckInterval == 0 {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			default:
 			}
 		}
@@ -269,9 +257,9 @@ func searchFile(ctx context.Context, path string, opts FileOptions, results chan
 		})
 	}
 	if err := scanner.Err(); err != nil {
-		return fileErr("scan", path, err)
+		return nil, fileErr("scan", path, err)
 	}
-	return sendMatches(ctx, results, matches, emitMu)
+	return matches, nil
 }
 
 // collectContextMatches builds one Match per matching line with Before/After filled.

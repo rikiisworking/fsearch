@@ -184,3 +184,41 @@ func TestLoadGitignoreFileMissing(t *testing.T) {
 		t.Fatalf("missing file want nil Gitignore, got %#v", g)
 	}
 }
+
+// TestMVPDocumentedSemantics pins the root-.gitignore MVP claims from README.
+// Not full git parity — only what we document and implement.
+func TestMVPDocumentedSemantics(t *testing.T) {
+	g := NewGitignore(ParseGitignore(`
+# comments and blanks ignored
+
+*.o
+/build
+logs/
+!keep.o
+`))
+
+	tests := []struct {
+		name  string
+		path  string
+		isDir bool
+		want  bool // true = ignored
+	}{
+		{"glob any component", "src/a.o", false, true},
+		{"glob root file", "a.o", false, true},
+		{"anchored root hit", "build", true, true},
+		{"anchored nested miss", "pkg/build", true, false},
+		{"anchored child via prefix", "build/x.go", false, true},
+		{"dir only skips file named logs", "logs", false, false},
+		{"dir only matches dir", "logs", true, true},
+		{"dir only nested component", "src/logs", true, true},
+		{"negate last wins", "keep.o", false, false},
+		{"unrelated not ignored", "readme.md", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := g.Match(tt.path, tt.isDir); got != tt.want {
+				t.Errorf("Match(%q, isDir=%v) ignored=%v, want %v", tt.path, tt.isDir, got, tt.want)
+			}
+		})
+	}
+}

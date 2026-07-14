@@ -127,6 +127,35 @@ func TestWalkContextCancel(t *testing.T) {
 	}
 }
 
+func TestWalkContextCancelEmptyTree(t *testing.T) {
+	// No files emitted: cancel must still be reported (not nil success).
+	root := t.TempDir()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	files := make(chan string, 8)
+	err := Walk(ctx, root, ignore.New(nil, nil), files)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Walk empty cancelled = %v, want context.Canceled", err)
+	}
+}
+
+func TestWalkContextCancelAllFiltered(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.go"), "package a")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Extension filter matches nothing → no emit path.
+	files := make(chan string, 8)
+	err := Walk(ctx, root, ignore.New([]string{"md"}, nil), files)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Walk filtered cancelled = %v, want context.Canceled", err)
+	}
+}
+
 func TestWalkUnreadableDir(t *testing.T) {
 	root := t.TempDir()
 	good := filepath.Join(root, "good.go")

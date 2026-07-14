@@ -36,7 +36,7 @@ func Walk(ctx context.Context, root string, filter Filter, files chan<- string) 
 	// Single file root: emit if the filter allows it.
 	if !info.IsDir() {
 		if !filter.IncludeFile(root) {
-			return nil
+			return ctx.Err()
 		}
 		select {
 		case <-ctx.Done():
@@ -55,6 +55,7 @@ func Walk(ctx context.Context, root string, filter Filter, files chan<- string) 
 			return nil
 		}
 
+		// Honor cancellation on every entry (cheap vs readdir/stat).
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

@@ -61,12 +61,15 @@ Hits are grep-style: `path:line:content`
 With context (`-C N`):
 
 ```
-path-line:before
+path-line-before
 path:line:hit content
-path-line:after
+path-line-after
 --
 path:line:next hit
 ```
+
+Overlapping or adjacent context groups on the same file are coalesced (no
+duplicate lines, no mid-group `--`), like grep.
 
 On a TTY, path is magenta, line numbers green, and the keyword bold red on hit lines. Colors are off when piped, when `NO_COLOR` is set, or with `--no-color`.
 

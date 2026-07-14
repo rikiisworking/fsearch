@@ -40,6 +40,9 @@ func TestPrinterContext(t *testing.T) {
 	if err := p.WriteMatch(&buf, m); err != nil {
 		t.Fatalf("WriteMatch: %v", err)
 	}
+	if err := p.Flush(&buf); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
 
 	want := "" +
 		"a.txt-2-beta\n" +
@@ -51,6 +54,7 @@ func TestPrinterContext(t *testing.T) {
 }
 
 func TestPrinterContextSeparator(t *testing.T) {
+	// Overlapping -C 1 hits coalesce: no mid "--", no duplicate shared context.
 	p := &Printer{NoColor: true}
 	var buf bytes.Buffer
 
@@ -75,15 +79,130 @@ func TestPrinterContextSeparator(t *testing.T) {
 	if err := p.WriteMatch(&buf, m2); err != nil {
 		t.Fatalf("WriteMatch m2: %v", err)
 	}
+	if err := p.Flush(&buf); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
 
 	want := "" +
 		"a.txt-2-beta\n" +
 		"a.txt:3:HIT one\n" +
 		"a.txt-4-gamma\n" +
-		"--\n" +
-		"a.txt-4-gamma\n" +
 		"a.txt:5:HIT two\n" +
 		"a.txt-6-delta\n"
+	if got := buf.String(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestPrinterContextConsecutiveHits(t *testing.T) {
+	// HIT on consecutive lines: each must print with ":" (not as context of the other).
+	// File: a / HIT1 / HIT2 / b  with -C 1.
+	p := &Printer{NoColor: true}
+	var buf bytes.Buffer
+
+	m1 := searcher.Match{
+		Path: "a.txt", Line: 2, Content: "HIT1",
+		Before: []string{"a"}, After: []string{"HIT2"},
+	}
+	m2 := searcher.Match{
+		Path: "a.txt", Line: 3, Content: "HIT2",
+		Before: []string{"HIT1"}, After: []string{"b"},
+	}
+
+	if err := p.WriteMatch(&buf, m1); err != nil {
+		t.Fatalf("WriteMatch m1: %v", err)
+	}
+	if err := p.WriteMatch(&buf, m2); err != nil {
+		t.Fatalf("WriteMatch m2: %v", err)
+	}
+	if err := p.Flush(&buf); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	want := "" +
+		"a.txt-1-a\n" +
+		"a.txt:2:HIT1\n" +
+		"a.txt:3:HIT2\n" +
+		"a.txt-4-b\n"
+	if got := buf.String(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestPrinterContextSeparatorFarApart(t *testing.T) {
+	// Non-overlapping groups still get "--".
+	p := &Printer{NoColor: true}
+	var buf bytes.Buffer
+
+	m1 := searcher.Match{
+		Path:    "a.txt",
+		Line:    2,
+		Content: "HIT one",
+		Before:  []string{"a"},
+		After:   []string{"b"},
+	}
+	m2 := searcher.Match{
+		Path:    "a.txt",
+		Line:    10,
+		Content: "HIT two",
+		Before:  []string{"i"},
+		After:   []string{"j"},
+	}
+
+	if err := p.WriteMatch(&buf, m1); err != nil {
+		t.Fatalf("WriteMatch m1: %v", err)
+	}
+	if err := p.WriteMatch(&buf, m2); err != nil {
+		t.Fatalf("WriteMatch m2: %v", err)
+	}
+	if err := p.Flush(&buf); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	want := "" +
+		"a.txt-1-a\n" +
+		"a.txt:2:HIT one\n" +
+		"a.txt-3-b\n" +
+		"--\n" +
+		"a.txt-9-i\n" +
+		"a.txt:10:HIT two\n" +
+		"a.txt-11-j\n"
+	if got := buf.String(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestPrinterContextSeparatorDifferentPaths(t *testing.T) {
+	p := &Printer{NoColor: true}
+	var buf bytes.Buffer
+
+	m1 := searcher.Match{
+		Path: "a.txt", Line: 2, Content: "HIT a",
+		Before: []string{"x"}, After: []string{"y"},
+	}
+	m2 := searcher.Match{
+		Path: "b.txt", Line: 2, Content: "HIT b",
+		Before: []string{"x"}, After: []string{"y"},
+	}
+
+	if err := p.WriteMatch(&buf, m1); err != nil {
+		t.Fatalf("WriteMatch m1: %v", err)
+	}
+	if err := p.WriteMatch(&buf, m2); err != nil {
+		t.Fatalf("WriteMatch m2: %v", err)
+	}
+	if err := p.Flush(&buf); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	want := "" +
+		"a.txt-1-x\n" +
+		"a.txt:2:HIT a\n" +
+		"a.txt-3-y\n" +
+		"--\n" +
+		"b.txt-1-x\n" +
+		"b.txt:2:HIT b\n" +
+		"b.txt-3-y\n"
 	if got := buf.String(); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -133,11 +252,13 @@ func TestPrinterContextEdges(t *testing.T) {
 	if err := p.WriteMatch(&buf, last); err != nil {
 		t.Fatalf("last: %v", err)
 	}
+	if err := p.Flush(&buf); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
 
+	// Lines 1 and 3 with After/Before of "middle" abut → coalesced (no "--", no dup).
 	want := "" +
 		"e.txt:1:HIT first\n" +
-		"e.txt-2-middle\n" +
-		"--\n" +
 		"e.txt-2-middle\n" +
 		"e.txt:3:HIT last\n"
 	if got := buf.String(); got != want {
@@ -229,6 +350,24 @@ func TestHighlight(t *testing.T) {
 			enabled: true,
 			want:    "todo " + paint("TODO"),
 		},
+		{
+			// ToLower("İ") expands (i + combining dot). Old code sliced original
+			// with lowered indices and could panic or corrupt spans.
+			name:       "ignore-case length-changing fold does not panic",
+			content:    "İx",
+			keyword:    "x",
+			ignoreCase: true,
+			enabled:    true,
+			want:       "İ" + paint("x"),
+		},
+		{
+			name:       "ignore-case match after multi-byte rune",
+			content:    "İTODO",
+			keyword:    "todo",
+			ignoreCase: true,
+			enabled:    true,
+			want:       "İ" + paint("TODO"),
+		},
 	}
 
 	for _, tt := range tests {
@@ -258,6 +397,9 @@ func TestPrinterHighlightOnlyOnHitLine(t *testing.T) {
 	}
 	if err := p.WriteMatch(&buf, m); err != nil {
 		t.Fatalf("WriteMatch: %v", err)
+	}
+	if err := p.Flush(&buf); err != nil {
+		t.Fatalf("Flush: %v", err)
 	}
 	got := buf.String()
 

@@ -127,7 +127,8 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, n
 				return err
 			}
 		}
-		return nil
+		// Flush coalesced context groups buffered by the printer.
+		return printer.Flush(stdout)
 	})
 
 	return g.Wait()

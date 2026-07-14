@@ -62,10 +62,10 @@ A fast, user-friendly CLI tool that searches for keywords inside files recursive
 - Benchmarks (`make bench`)
 - Error handling polish (walk + file skip warnings on stderr)
 
-### Sprint 4: Polish & Extra Features
-- JSON output
-- Regex support
-- Progress indicator
+### Sprint 4: Polish & Extra Features ✅
+- JSON output (`--json` NDJSON)
+- Regex support (`-e`/`--regex`, Go RE2)
+- Progress indicator (stderr TTY; `--no-progress`)
 - Installation instructions for Linux
 
 ### Sprint 5: Documentation & Release

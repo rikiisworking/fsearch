@@ -62,8 +62,12 @@ End-to-end: `./bin/fsearch "TODO" . --ext go,md -C 1 -i`
 Root `.gitignore` (MVP parse/match) + `--no-gitignore`; `--workers`; searcher benchmarks (`make bench`); walk/file skip warnings via OnError.  
 End-to-end: `./bin/fsearch "TODO" . --ext go,md -C 1 -i --workers 4`
 
-**Next: Sprint 4 – Polish & Extra Features**  
-JSON output, regex, progress indicator, install docs.
+**Sprint 4 – Polish & Extra Features** ✅ complete  
+`--json` (NDJSON), `-e`/`--regex` (Go RE2) + highlight spans, stderr progress (`--no-progress`), Linux install docs.  
+End-to-end: `./bin/fsearch 'TODO|FIXME' . --ext go -e --json`
+
+**Next: Sprint 5 – Documentation & Release**  
+Excellent README polish, man page or advanced help, final review + cleanup.
 
 ## Future Notes
 - Performance is important (should feel snappy on large codebases)

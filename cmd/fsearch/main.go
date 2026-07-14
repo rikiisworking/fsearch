@@ -28,6 +28,7 @@ func newRootCmd() *cobra.Command {
 		ignores      []string
 		ignoreCase   bool
 		contextLines int
+		workers      int
 		noColor      bool
 	)
 
@@ -55,12 +56,17 @@ Examples:
 			if contextLines < 0 {
 				return fmt.Errorf("context must be >= 0, got %d", contextLines)
 			}
+			if workers < 0 {
+				return fmt.Errorf("workers must be >= 0, got %d", workers)
+			}
 			keyword := args[0]
 			root := "."
 			if len(args) > 1 {
 				root = args[1]
 			}
 			opts := buildOptions(keyword, root, exts, ignores, ignoreCase, contextLines)
+			// 0 means searcher uses runtime.NumCPU() (existing library default).
+			opts.Workers = workers
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
@@ -73,6 +79,7 @@ Examples:
 	cmd.Flags().StringArrayVar(&ignores, "ignore", nil, "basename or pattern to ignore (repeatable)")
 	cmd.Flags().BoolVarP(&ignoreCase, "ignore-case", "i", false, "case-insensitive search")
 	cmd.Flags().IntVarP(&contextLines, "context", "C", 0, "lines of context before and after each match")
+	cmd.Flags().IntVar(&workers, "workers", 0, "number of concurrent file-search workers (0 = NumCPU)")
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	cmd.SilenceUsage = true
 

@@ -79,6 +79,7 @@ On a TTY, path is magenta, line numbers green, and the keyword bold red on hit l
 | `--ignore PAT` | skip basenames matching PAT (exact or glob; repeatable) |
 | `-i`, `--ignore-case` | case-insensitive search (default: case-sensitive) |
 | `-C`, `--context N` | N lines of context before and after each match |
+| `--workers N` | concurrent file-search workers (`0` = `NumCPU`, default) |
 | `--no-color` | disable colored output |
 
 ## Develop

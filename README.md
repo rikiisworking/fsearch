@@ -73,6 +73,9 @@ duplicate lines, no mid-group `--`), like grep.
 
 On a TTY, path is magenta, line numbers green, and the keyword bold red on hit lines. Colors are off when piped, when `NO_COLOR` is set, or with `--no-color`.
 
+Unreadable paths during walk or file open are skipped; a warning goes to stderr
+(`fsearch: skip <path>: …`) and the search continues.
+
 | Flag | Meaning |
 |------|---------|
 | `--ext go,md` | only these extensions (empty = all) |

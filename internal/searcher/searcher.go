@@ -63,9 +63,10 @@ type Options struct {
 	IgnoreCase   bool     // false = case-sensitive (default)
 	ContextLines int      // lines of context before/after each hit; 0 = none
 
-	// OnError is called when a file cannot be searched (open/read/scan).
-	// Cancel errors are not reported here; Search returns ctx.Err() instead.
-	// Optional: nil = silent skip. May be called concurrently from workers.
+	// OnError is called when a path cannot be walked or a file cannot be
+	// searched (open/read/scan). Cancel errors are not reported here; Search
+	// returns ctx.Err() instead. Optional: nil = silent skip.
+	// May be called concurrently from the walker and from workers.
 	OnError func(path string, err error)
 }
 
@@ -105,7 +106,8 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 	// Producer: walk tree, send paths, then close channel.
 	g.Go(func() error {
 		defer close(files)
-		return walker.Walk(ctx, opts.Root, filter, files)
+		// Reuse OnError for walk entry failures (e.g. permission denied on a dir).
+		return walker.Walk(ctx, opts.Root, filter, files, opts.OnError)
 	})
 
 	fileOpts := FileOptions{

@@ -3,6 +3,7 @@ package searcher
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -793,5 +794,152 @@ func TestSearchOnFileDone(t *testing.T) {
 	}
 	if !seen["a.go"] || !seen["b.go"] {
 		t.Errorf("OnFileDone files = %v, want a.go and b.go", files)
+	}
+}
+
+func TestSearchOnFileDoneAfterIOError(t *testing.T) {
+	// Per-file open failure should call OnFileDone(path, 0) so progress still advances.
+	root := t.TempDir()
+	good := filepath.Join(root, "good.go")
+	bad := filepath.Join(root, "bad.go")
+	mustWrite(t, good, "package good\n// TODO ok\n")
+	mustWrite(t, bad, "package bad\n// TODO hidden by perms\n")
+
+	if err := os.Chmod(bad, 0); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(bad, 0o644) })
+
+	if f, err := os.Open(bad); err == nil {
+		f.Close()
+		t.Skip("unreadable file still openable (root?); skip OnFileDone I/O test")
+	}
+
+	var (
+		mu       sync.Mutex
+		done     = map[string]int{}
+		errPaths []string
+	)
+	got, err := collectSearch(context.Background(), Options{
+		Root:    root,
+		Keyword: "TODO",
+		Workers: 2,
+		OnError: func(path string, err error) {
+			mu.Lock()
+			errPaths = append(errPaths, path)
+			mu.Unlock()
+		},
+		OnFileDone: func(path string, matchCount int) {
+			mu.Lock()
+			done[path] = matchCount
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if len(errPaths) != 1 || errPaths[0] != bad {
+		t.Errorf("OnError paths = %v, want [%q]", errPaths, bad)
+	}
+	if n, ok := done[bad]; !ok || n != 0 {
+		t.Errorf("OnFileDone for bad file = (%v, %d), want (present, 0)", ok, n)
+	}
+	if n, ok := done[good]; !ok || n != 1 {
+		t.Errorf("OnFileDone for good file = (%v, %d), want (present, 1)", ok, n)
+	}
+	if len(got) != 1 || got[0].Content != "// TODO ok" {
+		t.Errorf("hits = %v, want one good hit", got)
+	}
+}
+
+func TestSearchSameFileMatchesContiguous(t *testing.T) {
+	// Matches from one file must be delivered contiguously (line order) even
+	// with multiple workers, so consumers can coalesce context blocks.
+	root := t.TempDir()
+	const nFiles = 8
+	const hitsPerFile = 5
+	for i := 0; i < nFiles; i++ {
+		var b strings.Builder
+		b.WriteString("package p\n")
+		for h := 0; h < hitsPerFile; h++ {
+			b.WriteString("// TODO hit\n")
+			b.WriteString("// filler\n")
+		}
+		mustWrite(t, filepath.Join(root, fmt.Sprintf("f%d.go", i)), b.String())
+	}
+
+	// Collect in arrival order (do not sort).
+	results := make(chan Match, 64)
+	var got []Match
+	g, ctx := errgroup.WithContext(context.Background())
+	g.Go(func() error {
+		defer close(results)
+		return Search(ctx, Options{
+			Root:        root,
+			Keyword:     "TODO",
+			AllowedExts: []string{"go"},
+			Workers:     4,
+		}, results)
+	})
+	g.Go(func() error {
+		for m := range results {
+			got = append(got, m)
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != nFiles*hitsPerFile {
+		t.Fatalf("got %d hits, want %d", len(got), nFiles*hitsPerFile)
+	}
+
+	// Within each contiguous run of the same path, line numbers must be strictly
+	// increasing and the run length must equal hitsPerFile (no interleaving).
+	i := 0
+	for i < len(got) {
+		path := got[i].Path
+		start := i
+		lastLine := 0
+		for i < len(got) && got[i].Path == path {
+			if got[i].Line <= lastLine {
+				t.Errorf("path %s: non-increasing lines at index %d: %d then %d",
+					path, i, lastLine, got[i].Line)
+			}
+			lastLine = got[i].Line
+			i++
+		}
+		run := i - start
+		if run != hitsPerFile {
+			t.Errorf("path %s: contiguous run length %d, want %d (interleaved?)", path, run, hitsPerFile)
+		}
+	}
+}
+
+func TestNewMatcherLiteralFindAllIgnoreCase(t *testing.T) {
+	m, err := newMatcher("TODO", true, false)
+	if err != nil {
+		t.Fatalf("newMatcher: %v", err)
+	}
+	// Spans must cover original casing in the source line.
+	got := m.findAll("xx todo yy ToDo zz TODO")
+	want := [][]int{
+		{3, 7},   // "todo"
+		{11, 15}, // "ToDo"
+		{19, 23}, // "TODO"
+	}
+	if len(got) != len(want) {
+		t.Fatalf("findAll = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i][0] != want[i][0] || got[i][1] != want[i][1] {
+			t.Errorf("span %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+	// Empty keyword path is rejected by newMatcher; empty findAll keyword
+	// branch is defensive. No-match returns nil/empty.
+	if spans := m.findAll("nothing here"); len(spans) != 0 {
+		t.Errorf("no match findAll = %v, want empty", spans)
 	}
 }

@@ -45,6 +45,7 @@ func TestBuildOptions(t *testing.T) {
 		ignores      []string
 		ignoreCase   bool
 		contextLines int
+		regex        bool
 		wantOpts     searcher.Options
 	}{
 		{
@@ -102,11 +103,22 @@ func TestBuildOptions(t *testing.T) {
 				ContextLines: 2,
 			},
 		},
+		{
+			name:    "regex",
+			keyword: `TODO|FIXME`,
+			root:    ".",
+			regex:   true,
+			wantOpts: searcher.Options{
+				Root:    ".",
+				Keyword: `TODO|FIXME`,
+				Regex:   true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores, tt.ignoreCase, tt.contextLines)
+			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores, tt.ignoreCase, tt.contextLines, tt.regex)
 			if !reflect.DeepEqual(got, tt.wantOpts) {
 				t.Errorf("buildOptions() = %#v, want %#v", got, tt.wantOpts)
 			}
@@ -472,5 +484,95 @@ func TestCLISmokeSkipWarning(t *testing.T) {
 	// Hits must not leak onto stderr; warnings must not leak onto stdout.
 	if strings.Contains(stdout.String(), "fsearch: skip") {
 		t.Errorf("skip warning leaked to stdout: %q", stdout.String())
+	}
+}
+
+func TestCLISmokeRegex(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.go"), []byte("package b\n// FIXME there\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "c.go"), []byte("package c\n// note only\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{`TODO|FIXME`, root, "--ext", "go", "-e", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	got := out.String()
+	if !strings.Contains(got, "TODO here") {
+		t.Errorf("missing TODO hit: %q", got)
+	}
+	if !strings.Contains(got, "FIXME there") {
+		t.Errorf("missing FIXME hit: %q", got)
+	}
+	if strings.Contains(got, "note only") {
+		t.Errorf("unexpected non-match: %q", got)
+	}
+}
+
+func TestCLISmokeRegexIgnoreCase(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n// TODO here\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"todo", root, "--ext", "go", "-e", "-i", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "TODO here") {
+		t.Errorf("-e -i missing hit: %q", out.String())
+	}
+}
+
+func TestCLISmokeInvalidRegex(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"[", root, "-e"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid regex")
+	}
+	if !strings.Contains(err.Error(), "invalid regex") && !strings.Contains(err.Error(), "error parsing regexp") {
+		t.Errorf("error = %v, want invalid regex message", err)
+	}
+}
+
+func TestCLISmokeRegexLongFlag(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.go"), []byte("package a\n// FOO bar\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{`FOO`, root, "--ext", "go", "--regex", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "FOO bar") {
+		t.Errorf("--regex missing hit: %q", out.String())
 	}
 }

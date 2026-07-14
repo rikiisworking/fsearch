@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,6 +32,7 @@ func newRootCmd() *cobra.Command {
 		workers      int
 		noGitignore  bool
 		noColor      bool
+		regex        bool
 	)
 
 	cmd := &cobra.Command{
@@ -40,6 +42,7 @@ func newRootCmd() *cobra.Command {
 (recursively, including child directories).
 
 Matching is case-sensitive by default; use -i/--ignore-case to ignore case.
+With -e/--regex, the keyword is a Go RE2 regular expression.
 Output is grep-style (path:line:content). On a TTY, path/line/keyword are
 colored; use --no-color or pipe to disable. -C N adds N lines of context
 before and after each hit.
@@ -53,7 +56,9 @@ Examples:
   fsearch "TODO" . --ext go,md -C 1 -i
   fsearch "TODO" . --no-color
   fsearch "TODO" . --workers 4
-  fsearch "TODO" . --no-gitignore`,
+  fsearch "TODO" . --no-gitignore
+  fsearch 'TODO|FIXME' . -e
+  fsearch 'todo' . -e -i`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if contextLines < 0 {
@@ -67,7 +72,7 @@ Examples:
 			if len(args) > 1 {
 				root = args[1]
 			}
-			opts := buildOptions(keyword, root, exts, ignores, ignoreCase, contextLines)
+			opts := buildOptions(keyword, root, exts, ignores, ignoreCase, contextLines, regex)
 			// 0 means searcher uses runtime.NumCPU() (existing library default).
 			opts.Workers = workers
 			opts.NoGitignore = noGitignore
@@ -86,13 +91,14 @@ Examples:
 	cmd.Flags().IntVar(&workers, "workers", 0, "number of concurrent file-search workers (0 = NumCPU)")
 	cmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "do not load root .gitignore")
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "disable colored output")
+	cmd.Flags().BoolVarP(&regex, "regex", "e", false, "treat keyword as a Go RE2 regular expression")
 	cmd.SilenceUsage = true
 
 	return cmd
 }
 
 // buildOptions turns CLI args/flags into searcher.Options.
-func buildOptions(keyword, root, exts string, ignores []string, ignoreCase bool, contextLines int) searcher.Options {
+func buildOptions(keyword, root, exts string, ignores []string, ignoreCase bool, contextLines int, regex bool) searcher.Options {
 	var skip []string
 	for _, ig := range ignores {
 		skip = append(skip, parseList(ig)...)
@@ -104,6 +110,7 @@ func buildOptions(keyword, root, exts string, ignores []string, ignoreCase bool,
 		SkipPatterns: skip,
 		IgnoreCase:   ignoreCase,
 		ContextLines: contextLines,
+		Regex:        regex,
 	}
 }
 
@@ -116,6 +123,20 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, n
 	}
 	opts.OnError = func(path string, err error) {
 		fmt.Fprintf(stderr, "fsearch: skip %s: %v\n", path, err)
+	}
+
+	// Compile highlight regex once (same (?i) rules as searcher) before workers start.
+	var re *regexp.Regexp
+	if opts.Regex {
+		pattern := opts.Keyword
+		if opts.IgnoreCase {
+			pattern = "(?i)" + opts.Keyword
+		}
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("invalid regex: %w", err)
+		}
+		re = compiled
 	}
 
 	results := make(chan searcher.Match, 64)
@@ -132,6 +153,7 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, n
 		Keyword:    opts.Keyword,
 		IgnoreCase: opts.IgnoreCase,
 		NoColor:    noColor,
+		Regex:      re,
 	}
 	g.Go(func() error {
 		for m := range results {

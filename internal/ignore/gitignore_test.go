@@ -1,6 +1,8 @@
 package ignore
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -147,5 +149,38 @@ func TestGitignoreNilEmpty(t *testing.T) {
 	}
 	if NewGitignore(nil).Match("x", false) {
 		t.Fatal("empty Gitignore should not ignore")
+	}
+}
+
+func TestLoadGitignoreFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".gitignore")
+	content := "*.log\n!keep.log\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	g, err := LoadGitignoreFile(path)
+	if err != nil {
+		t.Fatalf("LoadGitignoreFile: %v", err)
+	}
+	if g == nil {
+		t.Fatal("expected non-nil Gitignore")
+	}
+	if !g.Match("a.log", false) {
+		t.Error("expected a.log ignored")
+	}
+	if g.Match("keep.log", false) {
+		t.Error("expected keep.log not ignored")
+	}
+}
+
+func TestLoadGitignoreFileMissing(t *testing.T) {
+	g, err := LoadGitignoreFile(filepath.Join(t.TempDir(), ".gitignore"))
+	if err != nil {
+		t.Fatalf("missing file should not error: %v", err)
+	}
+	if g != nil {
+		t.Fatalf("missing file want nil Gitignore, got %#v", g)
 	}
 }

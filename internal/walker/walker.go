@@ -12,9 +12,10 @@ import (
 // Filter decides which directories to prune and which files to include.
 // Implemented by ignore.Matcher (and anything else with the same shape).
 type Filter interface {
-	// SkipDir reports whether a directory basename should be pruned
-	// (walk does not enter it).
-	SkipDir(name string) bool
+	// SkipDir reports whether a directory should be pruned (walk does not enter it).
+	// path is the full directory path; name is filepath.Base(path).
+	// path is provided so filters can apply path-relative rules (e.g. .gitignore).
+	SkipDir(path, name string) bool
 
 	// IncludeFile reports whether a file path should be emitted for search.
 	IncludeFile(path string) bool
@@ -79,7 +80,7 @@ func Walk(ctx context.Context, root string, filter Filter, files chan<- string, 
 
 		if d.IsDir() {
 			// Never prune the walk root by basename defaults (e.g. root named "bin").
-			if path != root && filter.SkipDir(d.Name()) {
+			if path != root && filter.SkipDir(path, d.Name()) {
 				return fs.SkipDir
 			}
 			return nil

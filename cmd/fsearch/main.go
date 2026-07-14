@@ -33,6 +33,7 @@ func newRootCmd() *cobra.Command {
 		noGitignore  bool
 		noColor      bool
 		regex        bool
+		jsonOut      bool
 	)
 
 	cmd := &cobra.Command{
@@ -45,7 +46,7 @@ Matching is case-sensitive by default; use -i/--ignore-case to ignore case.
 With -e/--regex, the keyword is a Go RE2 regular expression.
 Output is grep-style (path:line:content). On a TTY, path/line/keyword are
 colored; use --no-color or pipe to disable. -C N adds N lines of context
-before and after each hit.
+before and after each hit. --json emits one NDJSON object per match.
 
 Examples:
   fsearch "TODO" .
@@ -58,7 +59,8 @@ Examples:
   fsearch "TODO" . --workers 4
   fsearch "TODO" . --no-gitignore
   fsearch 'TODO|FIXME' . -e
-  fsearch 'todo' . -e -i`,
+  fsearch 'todo' . -e -i
+  fsearch "TODO" . --json`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if contextLines < 0 {
@@ -80,7 +82,7 @@ Examples:
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
-			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(), noColor)
+			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(), noColor, jsonOut)
 		},
 	}
 
@@ -92,6 +94,7 @@ Examples:
 	cmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "do not load root .gitignore")
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	cmd.Flags().BoolVarP(&regex, "regex", "e", false, "treat keyword as a Go RE2 regular expression")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit one NDJSON object per match on stdout")
 	cmd.SilenceUsage = true
 
 	return cmd
@@ -114,10 +117,17 @@ func buildOptions(keyword, root, exts string, ignores []string, ignoreCase bool,
 	}
 }
 
+// matchWriter formats matches for stdout (human Printer or JSONPrinter).
+type matchWriter interface {
+	WriteMatch(w io.Writer, m searcher.Match) error
+	Flush(w io.Writer) error
+}
+
 // run executes search: hits go to stdout, skip warnings to stderr.
 // If stderr is nil, warnings are discarded.
-// noColor forces plain output (also auto-disabled for non-TTY via fatih/color).
-func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, noColor bool) error {
+// noColor forces plain human output (also auto-disabled for non-TTY via fatih/color).
+// jsonOut selects NDJSON (one object per match); colors are never applied in JSON mode.
+func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, noColor, jsonOut bool) error {
 	if stderr == nil {
 		stderr = io.Discard
 	}
@@ -125,7 +135,8 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, n
 		fmt.Fprintf(stderr, "fsearch: skip %s: %v\n", path, err)
 	}
 
-	// Compile highlight regex once (same (?i) rules as searcher) before workers start.
+	// Compile/validate regex once (same (?i) rules as searcher) before workers start.
+	// Highlight RE is only attached to the human printer; JSON has no highlight.
 	var re *regexp.Regexp
 	if opts.Regex {
 		pattern := opts.Keyword
@@ -136,7 +147,21 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, n
 		if err != nil {
 			return fmt.Errorf("invalid regex: %w", err)
 		}
-		re = compiled
+		if !jsonOut {
+			re = compiled
+		}
+	}
+
+	var printer matchWriter
+	if jsonOut {
+		printer = &output.JSONPrinter{}
+	} else {
+		printer = &output.Printer{
+			Keyword:    opts.Keyword,
+			IgnoreCase: opts.IgnoreCase,
+			NoColor:    noColor,
+			Regex:      re,
+		}
 	}
 
 	results := make(chan searcher.Match, 64)
@@ -149,19 +174,13 @@ func run(ctx context.Context, opts searcher.Options, stdout, stderr io.Writer, n
 	})
 
 	// Consumer: single writer to stdout (no mutex needed).
-	printer := &output.Printer{
-		Keyword:    opts.Keyword,
-		IgnoreCase: opts.IgnoreCase,
-		NoColor:    noColor,
-		Regex:      re,
-	}
 	g.Go(func() error {
 		for m := range results {
 			if err := printer.WriteMatch(stdout, m); err != nil {
 				return err
 			}
 		}
-		// Flush coalesced context groups buffered by the printer.
+		// Flush coalesced context groups buffered by the human printer.
 		return printer.Flush(stdout)
 	})
 

@@ -63,6 +63,8 @@ type Options struct {
 	Workers      int      // 0 = runtime.NumCPU()
 	IgnoreCase   bool     // false = case-sensitive (default)
 	ContextLines int      // lines of context before/after each hit; 0 = none
+	// NoGitignore skips loading root/.gitignore (defaults and --ignore still apply).
+	NoGitignore bool
 
 	// OnError is called when a path cannot be walked or a file cannot be
 	// searched (open/read/scan). Cancel errors are not reported here; Search
@@ -101,14 +103,16 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 
 	filter := ignore.New(opts.AllowedExts, opts.SkipPatterns)
 	// Load root .gitignore when present (missing file is not an error).
-	giPath := filepath.Join(opts.Root, ".gitignore")
-	if gi, err := ignore.LoadGitignoreFile(giPath); err != nil {
-		// Non-missing I/O failure: surface via OnError if set, else ignore quietly.
-		if opts.OnError != nil {
-			opts.OnError(giPath, err)
+	if !opts.NoGitignore {
+		giPath := filepath.Join(opts.Root, ".gitignore")
+		if gi, err := ignore.LoadGitignoreFile(giPath); err != nil {
+			// Non-missing I/O failure: surface via OnError if set, else ignore quietly.
+			if opts.OnError != nil {
+				opts.OnError(giPath, err)
+			}
+		} else if gi != nil {
+			filter.SetGitignore(opts.Root, gi)
 		}
-	} else if gi != nil {
-		filter.SetGitignore(opts.Root, gi)
 	}
 	files := make(chan string, workers*2)
 

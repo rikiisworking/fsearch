@@ -29,6 +29,7 @@ func newRootCmd() *cobra.Command {
 		ignoreCase   bool
 		contextLines int
 		workers      int
+		noGitignore  bool
 		noColor      bool
 	)
 
@@ -67,6 +68,7 @@ Examples:
 			opts := buildOptions(keyword, root, exts, ignores, ignoreCase, contextLines)
 			// 0 means searcher uses runtime.NumCPU() (existing library default).
 			opts.Workers = workers
+			opts.NoGitignore = noGitignore
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
@@ -80,6 +82,7 @@ Examples:
 	cmd.Flags().BoolVarP(&ignoreCase, "ignore-case", "i", false, "case-insensitive search")
 	cmd.Flags().IntVarP(&contextLines, "context", "C", 0, "lines of context before and after each match")
 	cmd.Flags().IntVar(&workers, "workers", 0, "number of concurrent file-search workers (0 = NumCPU)")
+	cmd.Flags().BoolVar(&noGitignore, "no-gitignore", false, "do not load root .gitignore")
 	cmd.Flags().BoolVar(&noColor, "no-color", false, "disable colored output")
 	cmd.SilenceUsage = true
 

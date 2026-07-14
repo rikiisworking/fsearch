@@ -346,6 +346,28 @@ func TestSearchGitignore(t *testing.T) {
 	}
 }
 
+func TestSearchNoGitignore(t *testing.T) {
+	// NoGitignore should search paths that .gitignore would hide.
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".gitignore"), "*.skip\n")
+	mustWrite(t, filepath.Join(root, "keep.go"), "package keep\n// TODO keep\n")
+	mustWrite(t, filepath.Join(root, "noise.skip"), "package noise\n// TODO skip-file\n")
+
+	got, err := collectSearch(context.Background(), Options{
+		Root:         root,
+		Keyword:      "TODO",
+		AllowedExts:  []string{"go", "skip"},
+		Workers:      1,
+		NoGitignore:  true,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("NoGitignore: got %d matches, want 2: %+v", len(got), got)
+	}
+}
+
 func TestSearchEmptyKeyword(t *testing.T) {
 	err := Search(context.Background(), Options{Root: ".", Keyword: ""}, make(chan Match))
 	if err == nil {

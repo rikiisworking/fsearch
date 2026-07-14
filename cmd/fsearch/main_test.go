@@ -304,6 +304,48 @@ func TestCLISmokeWorkersOne(t *testing.T) {
 	}
 }
 
+func TestCLISmokeNoGitignore(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.skip\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile gitignore: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.go"), []byte("package keep\n// TODO keep\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile keep: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "noise.skip"), []byte("package noise\n// TODO noise\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile noise: %v", err)
+	}
+
+	// Default: .gitignore hides noise.skip
+	var out bytes.Buffer
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go,skip", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute default: %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "TODO keep") {
+		t.Errorf("default missing keep hit: %q", out.String())
+	}
+	if strings.Contains(out.String(), "TODO noise") {
+		t.Errorf("default should hide noise.skip: %q", out.String())
+	}
+
+	// --no-gitignore: both hits
+	out.Reset()
+	cmd = newRootCmd()
+	cmd.SetArgs([]string{"TODO", root, "--ext", "go,skip", "--no-gitignore", "--no-color"})
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute --no-gitignore: %v\nout=%q", err, out.String())
+	}
+	if !strings.Contains(out.String(), "TODO keep") || !strings.Contains(out.String(), "TODO noise") {
+		t.Errorf("--no-gitignore want both hits: %q", out.String())
+	}
+}
+
 func TestCLISmokeNoColor(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "a.go")

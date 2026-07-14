@@ -58,8 +58,12 @@ Flags: `-i`/`--ignore-case`, `-C`/`--context`, `--no-color` (plus `--ext`, `--ig
 Context lines filled on `Match.Before`/`After`; grep-style context print; colored path/line + keyword highlight via fatih/color.  
 End-to-end: `./bin/fsearch "TODO" . --ext go,md -C 1 -i`
 
-**Next: Sprint 3 – Performance & Robustness**  
-`.gitignore` support, concurrency tuning/benchmarks, error handling polish.
+**Sprint 3 – Performance & Robustness** ✅ complete  
+Root `.gitignore` (MVP parse/match) + `--no-gitignore`; `--workers`; searcher benchmarks (`make bench`); walk/file skip warnings via OnError.  
+End-to-end: `./bin/fsearch "TODO" . --ext go,md -C 1 -i --workers 4`
+
+**Next: Sprint 4 – Polish & Extra Features**  
+JSON output, regex, progress indicator, install docs.
 
 ## Future Notes
 - Performance is important (should feel snappy on large codebases)

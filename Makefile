@@ -1,4 +1,4 @@
-.PHONY: build install test cover clean run
+.PHONY: build install test cover bench clean run
 
 BINARY := bin/fsearch
 PKG    := ./cmd/fsearch
@@ -14,6 +14,13 @@ test:
 
 cover:
 	go test ./... -cover
+
+# Searcher benchmarks (walk + concurrent scan). Override with:
+#   make bench BENCH=BenchmarkSearch BENCHTIME=2s
+BENCH ?= .
+BENCHTIME ?= 1s
+bench:
+	go test ./internal/searcher -run='^$$' -bench=$(BENCH) -benchmem -benchtime=$(BENCHTIME)
 
 clean:
 	rm -rf bin/

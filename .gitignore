@@ -5,6 +5,12 @@
 *.test
 *.out
 
+# Profiles / local bench artifacts
+*.prof
+
+# Dependency trees (not used by this Go project)
+/node_modules/
+
 # Go
 /vendor/
 go.work

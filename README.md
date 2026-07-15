@@ -412,6 +412,52 @@ flowchart LR
 3. **Cancel** — `context` from Ctrl+C stops the walk and workers via `errgroup`.
 4. **Emit** — a single consumer goroutine writes matches to stdout (line-safe without a mutex).
 
+### Path filtering
+
+During the walk, directories and files are decided by `internal/ignore` (defaults, `--ignore`, root `.gitignore`, then `--ext` for files):
+
+```mermaid
+flowchart TD
+  Start([path from WalkDir]) --> Sym{symlink?}
+  Sym -->|yes| Skip[skip]
+  Sym -->|no| Dir{directory?}
+  Dir -->|yes| Root{walk root?}
+  Root -->|yes| Enter[enter directory]
+  Root -->|no| Def{default skip dir?<br/>.git, node_modules, …}
+  Def -->|yes| Skip
+  Def -->|no| Ig{--ignore basename?}
+  Ig -->|yes| Skip
+  Ig -->|no| GI{root .gitignore<br/>ignores dir?}
+  GI -->|yes| Skip
+  GI -->|no| Enter
+  Dir -->|no| Reg{regular file?}
+  Reg -->|no| Skip
+  Reg -->|yes| IgF{--ignore basename?}
+  IgF -->|yes| Skip
+  IgF -->|no| GIF{root .gitignore<br/>ignores file?}
+  GIF -->|yes| Skip
+  GIF -->|no| Ext{--ext allow-list?}
+  Ext -->|empty / match| Emit[emit path to workers]
+  Ext -->|no match| Skip
+```
+
+### Per-file scan
+
+Each worker opens a path, skips obvious binaries, then either streams lines or buffers the file when `-C` needs context:
+
+```mermaid
+flowchart TD
+  Open[open file] --> Head[read first 8KiB]
+  Head --> Bin{NUL byte?}
+  Bin -->|yes| None[no matches]
+  Bin -->|no| Ctx{ContextLines > 0?}
+  Ctx -->|no| Stream[scan line-by-line<br/>literal or regex match]
+  Ctx -->|yes| Buf[read all lines<br/>fill Before/After per hit]
+  Stream --> Hits[matches for this file]
+  Buf --> Hits
+  Hits --> Send[send contiguously on results chan]
+```
+
 ## Docs
 
 - [AGENTS.md](AGENTS.md) — agent/dev rules

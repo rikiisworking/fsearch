@@ -1,5 +1,8 @@
 # fsearch
 
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev/dl/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+
 Fast recursive file content search for the Linux shell.
 
 Modern, concurrent alternative to classic `grep` / `find` combos.
@@ -18,7 +21,9 @@ Modern, concurrent alternative to classic `grep` / `find` combos.
 - [Requirements](#requirements) · [Build](#build) · [Install](#install)
 - [Usage](#usage) · [Flags](#flags) · [Output format](#output-format)
 - [Known limitations](#known-limitations)
-- [Develop](#develop) · [Project structure](#project-structure) · [Docs](#docs)
+- [Develop](#develop) · [Project structure](#project-structure)
+- [Architecture](#architecture) · [Path filtering](#path-filtering) · [Per-file scan](#per-file-scan)
+- [Docs](#docs)
 
 ## Quick start
 

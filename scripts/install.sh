@@ -42,8 +42,13 @@ esac
 
 if $path_has_bin_dir; then
 	echo "PATH already includes $BIN_DIR — fsearch should work in this shell."
-	if command -v fsearch >/dev/null 2>&1; then
-		echo "OK: fsearch is on PATH ($(command -v fsearch))."
+	if found="$(command -v fsearch 2>/dev/null)" && [[ -n "$found" ]]; then
+		echo "OK: fsearch is on PATH ($found)."
+		if [[ "$found" != "$BIN_PATH" ]]; then
+			echo "note: shell resolves fsearch to $found (not $BIN_PATH); check PATH order if that is unexpected."
+		fi
+	else
+		echo "warning: $BIN_DIR is on PATH but fsearch was not found; try opening a new shell or: hash -r"
 	fi
 	exit 0
 fi

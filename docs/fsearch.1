@@ -20,8 +20,8 @@ Matching is case-sensitive by default; use
 to ignore case. With
 .B \-e
 /
-.B \-\-regex ,
-the keyword is a Go RE2 regular expression.
+.BR \-\-regex ,
+the keyword is treated as a Go RE2 regular expression.
 .PP
 Output is grep-style
 .RB ( path:line:content ).
@@ -119,6 +119,12 @@ fsearch "TODO" . --json
 fsearch "TODO" . --no-progress
 fsearch "TODO" . --workers 4
 .EE
+.SH NOTES
+.I keyword
+must be non-empty (whitespace-only is rejected).
+.PP
+The primary supported platform is Linux;
+macOS and Windows builds via Go are best-effort (see the project README).
 .SH SEE ALSO
 Project README (Quick start, install, limitations) and
 .BR fsearch " --help" .

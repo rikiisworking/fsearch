@@ -342,7 +342,7 @@ sequenceDiagram
   Searcher->>Walker: Walk → files channel
   loop each file path
     Walker-->>Workers: path
-    Workers->>Workers: SearchFile(keyword, context)
+    Workers->>Workers: scan file (keyword / context)
     Workers-->>CLI: emit(Match)
     CLI->>Out: Printer.WriteMatch → stdout
   end
@@ -386,5 +386,6 @@ flowchart LR
 View the man page from a clone:
 
 ```bash
-man ./docs/fsearch.1
+make man
+# or: man ./docs/fsearch.1
 ```

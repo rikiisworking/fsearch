@@ -375,12 +375,3 @@ func newLineScanner(r io.Reader) *bufio.Scanner {
 	scanner.Buffer(buf, 1024*1024)
 	return scanner
 }
-
-// lineMatch reports whether line contains keyword.
-// When ignoreCase is true, keyword must already be lowercased by the caller.
-func lineMatch(line, keyword string, ignoreCase bool) bool {
-	if !ignoreCase {
-		return strings.Contains(line, keyword)
-	}
-	return strings.Contains(strings.ToLower(line), keyword)
-}

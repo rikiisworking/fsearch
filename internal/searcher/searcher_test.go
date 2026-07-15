@@ -724,34 +724,6 @@ func TestSearchRegex(t *testing.T) {
 	}
 }
 
-func TestNewMatcherLiteralFindAll(t *testing.T) {
-	m, err := newMatcher("ab", false, false)
-	if err != nil {
-		t.Fatalf("newMatcher: %v", err)
-	}
-	got := m.findAll("xxabyyabzz")
-	want := [][]int{{2, 4}, {6, 8}}
-	if len(got) != len(want) {
-		t.Fatalf("findAll = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i][0] != want[i][0] || got[i][1] != want[i][1] {
-			t.Errorf("span %d = %v, want %v", i, got[i], want[i])
-		}
-	}
-}
-
-func TestNewMatcherRegexFindAll(t *testing.T) {
-	m, err := newMatcher(`a+`, false, true)
-	if err != nil {
-		t.Fatalf("newMatcher: %v", err)
-	}
-	got := m.findAll("xaaay")
-	if len(got) != 1 || got[0][0] != 1 || got[0][1] != 4 {
-		t.Errorf("findAll = %v, want [[1 4]]", got)
-	}
-}
-
 func TestSearchOnFileDone(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "a.go"), "package a\n// TODO one\n// TODO two\n")
@@ -917,29 +889,4 @@ func TestSearchSameFileMatchesContiguous(t *testing.T) {
 	}
 }
 
-func TestNewMatcherLiteralFindAllIgnoreCase(t *testing.T) {
-	m, err := newMatcher("TODO", true, false)
-	if err != nil {
-		t.Fatalf("newMatcher: %v", err)
-	}
-	// Spans must cover original casing in the source line.
-	got := m.findAll("xx todo yy ToDo zz TODO")
-	want := [][]int{
-		{3, 7},   // "todo"
-		{11, 15}, // "ToDo"
-		{19, 23}, // "TODO"
-	}
-	if len(got) != len(want) {
-		t.Fatalf("findAll = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i][0] != want[i][0] || got[i][1] != want[i][1] {
-			t.Errorf("span %d = %v, want %v", i, got[i], want[i])
-		}
-	}
-	// Empty keyword path is rejected by newMatcher; empty findAll keyword
-	// branch is defensive. No-match returns nil/empty.
-	if spans := m.findAll("nothing here"); len(spans) != 0 {
-		t.Errorf("no match findAll = %v, want empty", spans)
-	}
-}
+

@@ -18,10 +18,10 @@ type Matcher struct {
 // New builds a Matcher from an extension allow-list and skip patterns.
 // Extensions may include or omit a leading dot (e.g. "go" or ".go").
 // Empty allowedExts means all extensions are allowed.
+// Skip patterns are trimmed; empty entries are dropped once at construction.
 func New(allowedExts []string, skipPatterns []string) *Matcher {
 	m := &Matcher{
-		includeExts:  make(map[string]struct{}),
-		skipPatterns: append([]string(nil), skipPatterns...),
+		includeExts: make(map[string]struct{}),
 	}
 	for _, e := range allowedExts {
 		e = strings.TrimSpace(e)
@@ -30,6 +30,13 @@ func New(allowedExts []string, skipPatterns []string) *Matcher {
 			continue
 		}
 		m.includeExts[strings.ToLower(e)] = struct{}{}
+	}
+	for _, p := range skipPatterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		m.skipPatterns = append(m.skipPatterns, p)
 	}
 	return m
 }
@@ -154,12 +161,9 @@ func (m *Matcher) IncludeFile(path string) bool {
 
 // matchesSkipPattern reports whether name matches any user skip pattern.
 // Supports exact basename match and path.Match globs (e.g. "tmp*", "*.cache").
+// Patterns were trimmed in New.
 func (m *Matcher) matchesSkipPattern(name string) bool {
 	for _, p := range m.skipPatterns {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
 		if p == name {
 			return true
 		}

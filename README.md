@@ -6,6 +6,17 @@ Modern, concurrent alternative to classic `grep` / `find` combos.
 
 > **Status:** Sprint 5 — documentation & release (README polish, advanced help, final review).
 
+## Quick start
+
+```bash
+make build
+./bin/fsearch "TODO" . --ext go,md -C 1 -i
+```
+
+That builds the binary, then searches for `TODO` under the current directory (Go and Markdown only, one line of context, case-insensitive).
+
+See [Install (Linux)](#install-linux) and [Usage](#usage) for more options.
+
 ## Requirements
 
 - Go 1.25+ (module line in `go.mod`; tested with Go 1.26)

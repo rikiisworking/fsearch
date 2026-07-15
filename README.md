@@ -326,3 +326,10 @@ flowchart LR
 
 - [AGENTS.md](AGENTS.md) — agent/dev rules
 - [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — sprint plan
+- [docs/fsearch.1](docs/fsearch.1) — man page (section 1)
+
+View the man page from a clone:
+
+```bash
+man ./docs/fsearch.1
+```

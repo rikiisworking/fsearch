@@ -4,7 +4,7 @@ Fast recursive file content search for the Linux shell.
 
 Modern, concurrent alternative to classic `grep` / `find` combos.
 
-> **Status:** Sprint 4 — JSON output, regex (`-e`), progress indicator, install docs.
+> **Status:** Sprint 5 — documentation & release (README polish, advanced help, final review).
 
 ## Requirements
 

@@ -68,7 +68,7 @@ A fast, user-friendly CLI tool that searches for keywords inside files recursive
 - Progress indicator (stderr TTY; `--no-progress`)
 - Installation instructions for Linux
 
-### Sprint 5: Documentation & Release
+### Sprint 5: Documentation & Release 🚧 in progress
 - Excellent README with examples
 - Man page or advanced help
 - Final code review + cleanup

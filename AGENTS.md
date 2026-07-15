@@ -66,8 +66,8 @@ End-to-end: `./bin/fsearch "TODO" . --ext go,md -C 1 -i --workers 4`
 `--json` (NDJSON), `-e`/`--regex` (Go RE2) + highlight spans, stderr progress (`--no-progress`), Linux install docs.  
 End-to-end: `./bin/fsearch 'TODO|FIXME' . --ext go -e --json`
 
-**Next: Sprint 5 – Documentation & Release**  
-Excellent README polish, man page or advanced help, final review + cleanup.
+**Sprint 5 – Documentation & Release** 🚧 in progress  
+Excellent README with examples, man page or advanced help, final code review + cleanup.
 
 ## Future Notes
 - Performance is important (should feel snappy on large codebases)

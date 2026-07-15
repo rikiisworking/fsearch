@@ -7,11 +7,42 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/fatih/color"
 
 	"github.com/nick/fsearch/internal/searcher"
+)
+
+// Shared color instances (hot path: many lines). EnableColor so Sprint paints
+// even when the process-wide color.NoColor is true; callers still gate with useColor.
+var (
+	colorPathNormal = sync.OnceValue(func() *color.Color {
+		c := color.New(color.FgMagenta)
+		c.EnableColor()
+		return c
+	})
+	colorPathFaint = sync.OnceValue(func() *color.Color {
+		c := color.New(color.FgMagenta, color.Faint)
+		c.EnableColor()
+		return c
+	})
+	colorLineNormal = sync.OnceValue(func() *color.Color {
+		c := color.New(color.FgGreen)
+		c.EnableColor()
+		return c
+	})
+	colorLineFaint = sync.OnceValue(func() *color.Color {
+		c := color.New(color.FgGreen, color.Faint)
+		c.EnableColor()
+		return c
+	})
+	colorHit = sync.OnceValue(func() *color.Color {
+		c := color.New(color.FgRed, color.Bold)
+		c.EnableColor()
+		return c
+	})
 )
 
 // Printer formats Match values for the terminal.
@@ -191,11 +222,10 @@ func (p *Printer) colorPath(path string, isContext bool) string {
 	if !p.useColor() {
 		return path
 	}
-	c := color.New(color.FgMagenta)
 	if isContext {
-		c.Add(color.Faint)
+		return colorPathFaint().Sprint(path)
 	}
-	return c.Sprint(path)
+	return colorPathNormal().Sprint(path)
 }
 
 func (p *Printer) colorLine(lineNo int, isContext bool) string {
@@ -203,11 +233,10 @@ func (p *Printer) colorLine(lineNo int, isContext bool) string {
 	if !p.useColor() {
 		return s
 	}
-	c := color.New(color.FgGreen)
 	if isContext {
-		c.Add(color.Faint)
+		return colorLineFaint().Sprint(s)
 	}
-	return c.Sprint(s)
+	return colorLineNormal().Sprint(s)
 }
 
 // highlightContent wraps keyword/regex occurrences in bold red when color is enabled.
@@ -254,11 +283,7 @@ func highlightSpans(content string, spans [][]int) string {
 		return content
 	}
 
-	// EnableColor on this instance so highlight works even when the
-	// global color.NoColor is true (caller already gated with useColor).
-	c := color.New(color.FgRed, color.Bold)
-	c.EnableColor()
-
+	hit := colorHit()
 	var b strings.Builder
 	pos := 0
 	for _, sp := range spans {
@@ -270,7 +295,7 @@ func highlightSpans(content string, spans [][]int) string {
 			continue
 		}
 		b.WriteString(content[pos:start])
-		b.WriteString(c.Sprint(content[start:end]))
+		b.WriteString(hit.Sprint(content[start:end]))
 		pos = end
 	}
 	b.WriteString(content[pos:])

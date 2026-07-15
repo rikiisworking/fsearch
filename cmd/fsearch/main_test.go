@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -36,33 +37,28 @@ func TestParseList(t *testing.T) {
 	}
 }
 
-func TestBuildOptions(t *testing.T) {
+func TestCLIConfigToSearcherOptions(t *testing.T) {
 	tests := []struct {
-		name         string
-		keyword      string
-		root         string
-		exts         string
-		ignores      []string
-		ignoreCase   bool
-		contextLines int
-		regex        bool
-		wantOpts     searcher.Options
+		name     string
+		cfg      cliConfig
+		wantOpts searcher.Options
 	}{
 		{
-			name:    "defaults",
-			keyword: "TODO",
-			root:    ".",
+			name: "defaults",
+			cfg:  cliConfig{keyword: "TODO", root: "."},
 			wantOpts: searcher.Options{
 				Root:    ".",
 				Keyword: "TODO",
 			},
 		},
 		{
-			name:    "exts and single ignore",
-			keyword: "FIXME",
-			root:    "./internal",
-			exts:    "go,md",
-			ignores: []string{"vendor"},
+			name: "exts and single ignore",
+			cfg: cliConfig{
+				keyword: "FIXME",
+				root:    "./internal",
+				exts:    "go,md",
+				ignores: []string{"vendor"},
+			},
 			wantOpts: searcher.Options{
 				Root:         "./internal",
 				Keyword:      "FIXME",
@@ -71,10 +67,12 @@ func TestBuildOptions(t *testing.T) {
 			},
 		},
 		{
-			name:    "repeatable ignore and comma list",
-			keyword: "TODO",
-			root:    ".",
-			ignores: []string{"a", "b,c"},
+			name: "repeatable ignore and comma list",
+			cfg: cliConfig{
+				keyword: "TODO",
+				root:    ".",
+				ignores: []string{"a", "b,c"},
+			},
 			wantOpts: searcher.Options{
 				Root:         ".",
 				Keyword:      "TODO",
@@ -82,10 +80,12 @@ func TestBuildOptions(t *testing.T) {
 			},
 		},
 		{
-			name:       "ignore-case",
-			keyword:    "todo",
-			root:       ".",
-			ignoreCase: true,
+			name: "ignore-case",
+			cfg: cliConfig{
+				keyword:    "todo",
+				root:       ".",
+				ignoreCase: true,
+			},
 			wantOpts: searcher.Options{
 				Root:       ".",
 				Keyword:    "todo",
@@ -93,10 +93,12 @@ func TestBuildOptions(t *testing.T) {
 			},
 		},
 		{
-			name:         "context lines",
-			keyword:      "TODO",
-			root:         ".",
-			contextLines: 2,
+			name: "context lines",
+			cfg: cliConfig{
+				keyword:      "TODO",
+				root:         ".",
+				contextLines: 2,
+			},
 			wantOpts: searcher.Options{
 				Root:         ".",
 				Keyword:      "TODO",
@@ -104,25 +106,56 @@ func TestBuildOptions(t *testing.T) {
 			},
 		},
 		{
-			name:    "regex",
-			keyword: `TODO|FIXME`,
-			root:    ".",
-			regex:   true,
+			name: "regex",
+			cfg: cliConfig{
+				keyword: `TODO|FIXME`,
+				root:    ".",
+				regex:   true,
+			},
 			wantOpts: searcher.Options{
 				Root:    ".",
 				Keyword: `TODO|FIXME`,
 				Regex:   true,
 			},
 		},
+		{
+			name: "workers and no-gitignore",
+			cfg: cliConfig{
+				keyword:     "TODO",
+				root:        ".",
+				workers:     4,
+				noGitignore: true,
+			},
+			wantOpts: searcher.Options{
+				Root:        ".",
+				Keyword:     "TODO",
+				Workers:     4,
+				NoGitignore: true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildOptions(tt.keyword, tt.root, tt.exts, tt.ignores, tt.ignoreCase, tt.contextLines, tt.regex)
+			got := tt.cfg.toSearcherOptions()
 			if !reflect.DeepEqual(got, tt.wantOpts) {
-				t.Errorf("buildOptions() = %#v, want %#v", got, tt.wantOpts)
+				t.Errorf("toSearcherOptions() = %#v, want %#v", got, tt.wantOpts)
 			}
 		})
+	}
+}
+
+func TestCLISmokeEmptyKeyword(t *testing.T) {
+	cmd := newRootCmd()
+	cmd.SetArgs([]string{"", "."})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for empty keyword")
+	}
+	if !strings.Contains(err.Error(), "keyword is required") {
+		t.Errorf("error = %q, want keyword is required", err)
 	}
 }
 

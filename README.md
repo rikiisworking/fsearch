@@ -15,12 +15,13 @@ make build
 
 That builds the binary, then searches for `TODO` under the current directory (Go and Markdown only, one line of context, case-insensitive).
 
-See [Install (Linux)](#install-linux) and [Usage](#usage) for more options.
+See [Install](#install) and [Usage](#usage) for more options.
 
 ## Requirements
 
 - Go 1.25+ (module line in `go.mod`; tested with Go 1.26)
-- Linux
+- **Primary platform:** Linux (docs, `make install`, man page)
+- **macOS / Windows:** best-effort — the Go code is portable and usually builds/runs; packaging and install helpers are Linux-first
 
 ## Build
 
@@ -30,9 +31,11 @@ make build
 go build -o bin/fsearch ./cmd/fsearch
 ```
 
-## Install (Linux)
+## Install
 
-### From module (no clone)
+### Linux (recommended)
+
+#### From module (no clone)
 
 ```bash
 go install github.com/nick/fsearch/cmd/fsearch@latest
@@ -49,7 +52,7 @@ export PATH="$(go env GOPATH)/bin:$PATH"
 fsearch --help
 ```
 
-### From a local clone
+#### From a local clone
 
 ```bash
 make install
@@ -67,7 +70,7 @@ source ~/.bashrc
 fsearch --help
 ```
 
-### Copy a built binary
+#### Copy a built binary
 
 ```bash
 make build
@@ -75,6 +78,54 @@ sudo cp bin/fsearch /usr/local/bin/
 # or without sudo (same layout as make install):
 cp bin/fsearch ~/.local/bin/
 ```
+
+### macOS (best-effort)
+
+The binary is normal Go — build or install with the Go toolchain. Prefer `go install` (works with bash or zsh):
+
+```bash
+go install github.com/nick/fsearch/cmd/fsearch@latest
+
+# Put Go's bin dir on PATH if needed (GOBIN if set, else GOPATH/bin)
+export PATH="$(go env GOPATH)/bin:$PATH"
+# or: export PATH="$(go env GOBIN):$PATH"
+
+fsearch --help
+```
+
+From a clone:
+
+```bash
+go install ./cmd/fsearch
+# or
+go build -o bin/fsearch ./cmd/fsearch
+./bin/fsearch --help
+```
+
+Note: `make install` may work if Make, bash, and Go are available, but its PATH helper only edits `~/.bashrc`. On macOS the default shell is often **zsh** — add Go’s bin dir (or `~/.local/bin`) to `~/.zshrc` yourself if `fsearch` is not found.
+
+### Windows (best-effort)
+
+Not a first-class target, but you can install with Go (PowerShell or cmd):
+
+```powershell
+go install github.com/nick/fsearch/cmd/fsearch@latest
+```
+
+Ensure Go’s bin directory is on your user `PATH` (typically `%USERPROFILE%\go\bin`, or the path from `go env GOPATH` + `\bin`, or `go env GOBIN` if set). Then open a new terminal and run:
+
+```powershell
+fsearch --help
+```
+
+From a clone:
+
+```powershell
+go build -o fsearch.exe .\cmd\fsearch
+.\fsearch.exe --help
+```
+
+Caveats: no Windows install script; path separators and `.gitignore` matching may differ slightly from Linux; man page is for Unix-style `man`.
 
 ## Usage
 

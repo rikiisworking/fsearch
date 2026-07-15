@@ -4,7 +4,7 @@ Fast recursive file content search for the Linux shell.
 
 Modern, concurrent alternative to classic `grep` / `find` combos.
 
-> **Status:** Sprint 5 — documentation & release (README polish, advanced help, final review).
+> **Status:** Sprint 5 complete — polished docs, man page, `make install` to `~/.local/bin`, multi-OS install notes.
 
 ## Quick start
 

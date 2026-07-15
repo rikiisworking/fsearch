@@ -68,10 +68,11 @@ A fast, user-friendly CLI tool that searches for keywords inside files recursive
 - Progress indicator (stderr TTY; `--no-progress`)
 - Installation instructions for Linux
 
-### Sprint 5: Documentation & Release 🚧 in progress
-- Excellent README with examples
-- Man page or advanced help
-- Final code review + cleanup
+### Sprint 5: Documentation & Release ✅
+- Excellent README with examples (Quick start, grouped Usage, multi-OS install)
+- Man page (`docs/fsearch.1`) + advanced `--help` examples
+- `make install` → `~/.local/bin` via `scripts/install.sh`
+- Final verification (build, tests, smoke) + structure docs cleanup
 
 ## Recommended Project Structure
 

@@ -41,6 +41,7 @@ func Walk(ctx context.Context, root string, filter Filter, files chan<- string, 
 	// Single file root: emit if the filter allows it.
 	if !info.IsDir() {
 		if !filter.IncludeFile(root) {
+			// Nothing to emit; still surface cancel if the caller already cancelled.
 			return ctx.Err()
 		}
 		select {
@@ -70,11 +71,8 @@ func Walk(ctx context.Context, root string, filter Filter, files chan<- string, 
 		default:
 		}
 
-		// Skip symlinks to avoid cycles / surprise targets.
+		// WalkDir does not follow symlinks; skip them as search targets.
 		if d.Type()&fs.ModeSymlink != 0 {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
 			return nil
 		}
 

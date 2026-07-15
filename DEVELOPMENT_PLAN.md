@@ -85,6 +85,10 @@ fsearch/
 │   ├── walker/
 │   ├── output/
 │   └── ignore/
+├── docs/
+│   └── fsearch.1             # Man page
+├── scripts/
+│   └── install.sh            # make install helper
 ├── AGENTS.md                 # ← Critical for Grok Build
 ├── DEVELOPMENT_PLAN.md
 ├── Makefile

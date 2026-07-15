@@ -283,6 +283,10 @@ fsearch/
 │   ├── walker/              # filepath.WalkDir → file path channel
 │   ├── ignore/              # Extension allow-list + basename skip rules
 │   └── output/              # Grep-style, colors, NDJSON
+├── docs/
+│   └── fsearch.1            # Man page (section 1)
+├── scripts/
+│   └── install.sh           # make install → ~/.local/bin + PATH helper
 ├── bin/                     # Built binary (make build)
 ├── Makefile
 ├── go.mod / go.sum

@@ -68,39 +68,52 @@ cp bin/fsearch ~/bin/
 
 ## Usage
 
+### Basics
+
 ```bash
 fsearch --help
 
 # Search for a keyword under the current directory
 ./bin/fsearch "TODO" .
 
+# Everyday combo: extensions, context, case-insensitive
+./bin/fsearch "TODO" . --ext go,md -C 1 -i
+```
+
+### Filter files
+
+```bash
 # Only Go and Markdown files
 ./bin/fsearch "TODO" . --ext go,md
 
 # Extra basename ignores (repeatable)
 ./bin/fsearch "FIXME" ./internal --ignore vendor --ignore '*.min.js'
 
+# Skip loading root .gitignore (built-in skips and --ignore still apply)
+./bin/fsearch "TODO" . --no-gitignore
+```
+
+Root `.gitignore` is loaded automatically when present (root file only; MVP rule subset — see [Known limitations](#known-limitations)).
+
+### Match options
+
+```bash
 # Case-insensitive
 ./bin/fsearch "todo" . -i
 
 # One line of context before/after each hit
 ./bin/fsearch "TODO" . --ext go -C 1
 
-# Combined
-./bin/fsearch "TODO" . --ext go,md -C 1 -i
-
-# Force plain text (also automatic when piped / NO_COLOR)
-./bin/fsearch "TODO" . --no-color
-
-# Skip loading root .gitignore (built-in skips and --ignore still apply)
-./bin/fsearch "TODO" . --no-gitignore
-
-# Limit concurrent file-search workers (0 = NumCPU)
-./bin/fsearch "TODO" . --workers 4
-
 # Regex (Go RE2); combine with -i for case-insensitive patterns
 ./bin/fsearch 'TODO|FIXME' . --ext go -e
 ./bin/fsearch 'todo' . -e -i
+```
+
+### Output & speed
+
+```bash
+# Force plain text (also automatic when piped / NO_COLOR)
+./bin/fsearch "TODO" . --no-color
 
 # NDJSON (one JSON object per match; good for pipes / jq)
 ./bin/fsearch "TODO" . --ext go --json
@@ -108,9 +121,10 @@ fsearch --help
 
 # Disable stderr progress (also off when stderr is not a TTY or with --json)
 ./bin/fsearch "TODO" . --no-progress
-```
 
-Root `.gitignore` is loaded automatically when present (root file only; MVP rule subset — see [Known limitations](#known-limitations)).
+# Limit concurrent file-search workers (0 = NumCPU)
+./bin/fsearch "TODO" . --workers 4
+```
 
 ### Output format
 

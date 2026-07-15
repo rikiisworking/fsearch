@@ -6,6 +6,20 @@ Modern, concurrent alternative to classic `grep` / `find` combos.
 
 > **Status:** Sprint 5 complete — polished docs, man page, `make install` to `~/.local/bin`, multi-OS install notes.
 
+| | |
+|--|--|
+| **What** | Recursive keyword/regex search in file contents |
+| **Like** | A concurrent, developer-friendly `grep -R` for source trees |
+| **Primary OS** | Linux (macOS/Windows: best-effort via Go) |
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Requirements](#requirements) · [Build](#build) · [Install](#install)
+- [Usage](#usage) · [Flags](#flags) · [Output format](#output-format)
+- [Known limitations](#known-limitations)
+- [Develop](#develop) · [Project structure](#project-structure) · [Docs](#docs)
+
 ## Quick start
 
 ```bash
@@ -19,9 +33,11 @@ See [Install](#install) and [Usage](#usage) for more options.
 
 ## Requirements
 
-- Go 1.25+ (module line in `go.mod`; tested with Go 1.26)
-- **Primary platform:** Linux (docs, `make install`, man page)
-- **macOS / Windows:** best-effort — the Go code is portable and usually builds/runs; packaging and install helpers are Linux-first
+| | |
+|--|--|
+| **Go** | 1.25+ (`go.mod`; tested with Go 1.26) |
+| **Linux** | Primary — `make install`, man page, full docs |
+| **macOS / Windows** | Best-effort — portable Go binary; packaging is Linux-first |
 
 ## Build
 
@@ -32,6 +48,14 @@ go build -o bin/fsearch ./cmd/fsearch
 ```
 
 ## Install
+
+| You have… | Do this |
+|-----------|---------|
+| Linux + clone | `make install` → `~/.local/bin` (+ PATH helper) |
+| Any OS + Go module | `go install github.com/nick/fsearch/cmd/fsearch@latest` |
+| Built binary only | Copy to a dir on `PATH` (e.g. `~/.local/bin`) |
+| macOS (zsh) | Prefer `go install`; put Go bin on `PATH` in `~/.zshrc` if needed |
+| Windows | `go install` or `go build -o fsearch.exe .\cmd\fsearch` |
 
 ### Linux (recommended)
 
@@ -204,12 +228,15 @@ path:line:next hit
 Overlapping or adjacent context groups on the same file are coalesced (no
 duplicate lines, no mid-group `--`), like grep.
 
-On a TTY, path is magenta, line numbers green, and the keyword (or regex span)
-is bold red on hit lines. Colors are off when piped, when `NO_COLOR` is set, or
-with `--no-color`.
+| Mode | Behavior |
+|------|----------|
+| **TTY colors** | Path magenta, line green, keyword/regex span bold red (hit lines only) |
+| **No color** | Piped, `NO_COLOR`, or `--no-color` |
+| **JSON** | `--json`: one NDJSON object per match; no ANSI; no `--` coalescing |
+| **Progress** | stderr TTY: `fsearch: N files, M matches` (off with `--json` / `--no-progress`) |
+| **Errors** | Unreadable paths skipped; `fsearch: skip <path>: …` on stderr |
 
-**JSON (`--json`):** one NDJSON object per match on stdout (no ANSI, no `--`
-coalescing). Shape:
+**JSON shape:**
 
 ```json
 {"path":"main.go","line":3,"content":"// TODO here"}
@@ -219,11 +246,7 @@ coalescing). Shape:
 `before` / `after` are omitted when empty. Context from `-C` is still included
 on each object when present.
 
-**Progress:** when stderr is a TTY (and not `--json` / `--no-progress`), a
-updating line shows file and match counts, e.g. `fsearch: 128 files, 4 matches`.
-
-Unreadable paths during walk or file open are skipped; a warning goes to stderr
-(`fsearch: skip <path>: …`) and the search continues.
+## Flags
 
 | Flag | Meaning |
 |------|---------|
@@ -238,19 +261,31 @@ Unreadable paths during walk or file open are skipped; a warning goes to stderr
 | `--no-color` | disable colored output |
 | `--no-progress` | disable progress indicator on stderr |
 
-### Known limitations
+## Known limitations
 
-- **Root `.gitignore` only** — only `Root/.gitignore` is loaded (no nested `.gitignore`). Rules are an MVP subset: `#` comments, `!` negation (last match wins), trailing `/` (directories only), leading `/` (anchored to root), and basic globs via `filepath.Match`. Not full git semantics (no `**` parity, escaped spaces, etc.).
-- **Built-in directory skips always apply** — common junk dirs (e.g. `.git`, `node_modules`, `vendor`, `bin`, build/cache/IDE dirs) are pruned even when `.gitignore` is absent or `--no-gitignore` is set. They are separate from `--ignore`. There is no flag to disable the defaults.
-- **Match order** across files is not sorted; hits stream as workers finish. Matches from a single file stay in line order and contiguous for context coalescing.
-- **Binary skip** — files with a NUL byte in the first 8KiB are not searched.
+| Topic | Detail |
+|-------|--------|
+| **`.gitignore`** | Root file only (no nested). MVP rules: `#`, `!`, trailing `/`, leading `/`, basic `filepath.Match` globs — not full git (`**`, etc.) |
+| **Built-in skips** | Always prune common junk dirs (`.git`, `node_modules`, `vendor`, `bin`, …); not disabled by `--no-gitignore` |
+| **Match order** | Across files: unsorted (worker finish order). Within a file: line order, contiguous for context |
+| **Binary** | NUL in first 8KiB → file skipped |
 
 ## Develop
+
+| Target | Purpose |
+|--------|---------|
+| `make build` | Build `bin/fsearch` |
+| `make install` | Install to `~/.local/bin` (+ PATH helper) |
+| `make test` | `go test ./... -v` |
+| `make cover` | Coverage |
+| `make bench` | Searcher benchmarks (`BENCH=…`, `BENCHTIME=…`) |
+| `make man` | View `docs/fsearch.1` |
+| `make clean` | Remove `bin/` |
 
 ```bash
 make test
 make cover
-make bench          # searcher benchmarks (override: BENCH=BenchmarkSearch BENCHTIME=2s)
+make bench
 make clean
 ```
 

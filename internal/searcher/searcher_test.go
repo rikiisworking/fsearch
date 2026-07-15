@@ -889,4 +889,39 @@ func TestSearchSameFileMatchesContiguous(t *testing.T) {
 	}
 }
 
+func TestSearchFileNegativeContextLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	mustWrite(t, path, "before\nTODO hit\nafter\n")
 
+	// Negative N is treated as 0 (no context slices).
+	matches, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword:      "TODO",
+		ContextLines: -1,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("got %d matches, want 1", len(matches))
+	}
+	if matches[0].Before != nil || matches[0].After != nil {
+		t.Errorf("negative ContextLines should behave like 0: Before=%v After=%v",
+			matches[0].Before, matches[0].After)
+	}
+}
+
+func TestFileOpErrorUnwrap(t *testing.T) {
+	inner := errors.New("permission denied")
+	err := fileErr("open", "/tmp/x", inner)
+	var fe *fileOpError
+	if !errors.As(err, &fe) {
+		t.Fatalf("errors.As fileOpError failed: %v", err)
+	}
+	if !errors.Is(err, inner) {
+		t.Errorf("Unwrap/Is failed: %v", err)
+	}
+	if !strings.Contains(err.Error(), "open") || !strings.Contains(err.Error(), "/tmp/x") {
+		t.Errorf("Error() = %q, want op and path", err.Error())
+	}
+}

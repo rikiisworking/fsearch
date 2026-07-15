@@ -98,8 +98,10 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 	if strings.TrimSpace(opts.Keyword) == "" {
 		return fmt.Errorf("searcher: keyword is required")
 	}
-	// Fail fast on bad regex before walk/workers start.
-	if _, err := newMatcher(opts.Keyword, opts.IgnoreCase, opts.Regex); err != nil {
+	// Compile once for fail-fast validation and reuse across all files/workers
+	// (avoids recompiling the same regex/literal matcher per file).
+	m, err := newMatcher(opts.Keyword, opts.IgnoreCase, opts.Regex)
+	if err != nil {
 		return err
 	}
 	if opts.Root == "" {
@@ -152,7 +154,7 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 	for i := 0; i < workers; i++ {
 		g.Go(func() error {
 			for path := range files {
-				n, err := searchFile(ctx, path, fileOpts, results, &emitMu)
+				n, err := searchFile(ctx, path, fileOpts, m, results, &emitMu)
 				if err != nil {
 					if ctx.Err() != nil {
 						return ctx.Err()
@@ -187,8 +189,13 @@ func Search(ctx context.Context, opts Options, results chan<- Match) error {
 // When opts.ContextLines > 0, each Match includes Before/After context.
 // When opts.Regex is true, Keyword is compiled as a Go RE2 pattern;
 // invalid patterns return an error.
+// Negative ContextLines is treated as 0.
 func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, error) {
-	return scanFile(ctx, path, opts)
+	m, err := newMatcher(opts.Keyword, opts.IgnoreCase, opts.Regex)
+	if err != nil {
+		return nil, err
+	}
+	return scanFile(ctx, path, opts, m)
 }
 
 // searchFile scans path and sends each hit to results (does not close results).
@@ -198,11 +205,12 @@ func SearchFile(ctx context.Context, path string, opts FileOptions) ([]Match, er
 // When > 0, buffers lines so Before/After can be filled on each Match.
 // If emitMu is non-nil, all matches for this file are sent under that lock so
 // they appear contiguously on results.
-func searchFile(ctx context.Context, path string, opts FileOptions, results chan<- Match, emitMu *sync.Mutex) (int, error) {
+// m must be non-nil (shared across files in Search, or once per SearchFile).
+func searchFile(ctx context.Context, path string, opts FileOptions, m matcher, results chan<- Match, emitMu *sync.Mutex) (int, error) {
 	if results == nil {
 		return 0, fmt.Errorf("searcher: results is nil")
 	}
-	matches, err := scanFile(ctx, path, opts)
+	matches, err := scanFile(ctx, path, opts, m)
 	if err != nil {
 		return 0, err
 	}
@@ -213,12 +221,11 @@ func searchFile(ctx context.Context, path string, opts FileOptions, results chan
 }
 
 // scanFile opens path and returns all keyword/regex hits (no channel).
-// Binary files return (nil, nil). Keyword must be non-empty.
-// Invalid regex patterns return an error before scanning file contents.
-func scanFile(ctx context.Context, path string, opts FileOptions) ([]Match, error) {
-	m, err := newMatcher(opts.Keyword, opts.IgnoreCase, opts.Regex)
-	if err != nil {
-		return nil, err
+// Binary files return (nil, nil). m must be non-nil.
+// Negative ContextLines is treated as 0.
+func scanFile(ctx context.Context, path string, opts FileOptions, m matcher) ([]Match, error) {
+	if opts.ContextLines < 0 {
+		opts.ContextLines = 0
 	}
 
 	select {

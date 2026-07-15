@@ -52,19 +52,27 @@ Progress (files/matches) is shown on stderr when it is a TTY (not with --json);
 use --no-progress to disable.
 
 Examples:
-  fsearch "TODO" .
-  fsearch "TODO" . --ext go,md
-  fsearch "FIXME" ./internal --ignore vendor
-  fsearch "todo" . -i
-  fsearch "TODO" . -C 2
-  fsearch "TODO" . --ext go,md -C 1 -i
-  fsearch "TODO" . --no-color
-  fsearch "TODO" . --workers 4
-  fsearch "TODO" . --no-gitignore
-  fsearch 'TODO|FIXME' . -e
-  fsearch 'todo' . -e -i
-  fsearch "TODO" . --json
-  fsearch "TODO" . --no-progress`,
+
+  Basics:
+    fsearch "TODO" .
+    fsearch "TODO" . --ext go,md -C 1 -i
+
+  Filter files:
+    fsearch "TODO" . --ext go,md
+    fsearch "FIXME" ./internal --ignore vendor
+    fsearch "TODO" . --no-gitignore
+
+  Match options:
+    fsearch "todo" . -i
+    fsearch "TODO" . -C 2
+    fsearch 'TODO|FIXME' . -e
+    fsearch 'todo' . -e -i
+
+  Output & speed:
+    fsearch "TODO" . --no-color
+    fsearch "TODO" . --json
+    fsearch "TODO" . --no-progress
+    fsearch "TODO" . --workers 4`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if contextLines < 0 {

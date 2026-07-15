@@ -52,19 +52,27 @@ Progress (files/matches) is shown on stderr when it is a TTY (not with --json);
 use --no-progress to disable.
 
 Examples:
-  fsearch "TODO" .
-  fsearch "TODO" . --ext go,md
-  fsearch "FIXME" ./internal --ignore vendor
-  fsearch "todo" . -i
-  fsearch "TODO" . -C 2
-  fsearch "TODO" . --ext go,md -C 1 -i
-  fsearch "TODO" . --no-color
-  fsearch "TODO" . --workers 4
-  fsearch "TODO" . --no-gitignore
-  fsearch 'TODO|FIXME' . -e
-  fsearch 'todo' . -e -i
-  fsearch "TODO" . --json
-  fsearch "TODO" . --no-progress`,
+
+  Basics:
+    fsearch "TODO" .
+    fsearch "TODO" . --ext go,md -C 1 -i
+
+  Filter files:
+    fsearch "TODO" . --ext go,md
+    fsearch "FIXME" ./internal --ignore vendor
+    fsearch "TODO" . --no-gitignore
+
+  Match options:
+    fsearch "todo" . -i
+    fsearch "TODO" . -C 2
+    fsearch 'TODO|FIXME' . -e
+    fsearch 'todo' . -e -i
+
+  Output & speed:
+    fsearch "TODO" . --no-color
+    fsearch "TODO" . --json
+    fsearch "TODO" . --no-progress
+    fsearch "TODO" . --workers 4`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if contextLines < 0 {
@@ -74,19 +82,29 @@ Examples:
 				return fmt.Errorf("workers must be >= 0, got %d", workers)
 			}
 			keyword := args[0]
+			if strings.TrimSpace(keyword) == "" {
+				return fmt.Errorf("keyword is required")
+			}
 			root := "."
 			if len(args) > 1 {
 				root = args[1]
 			}
-			opts := buildOptions(keyword, root, exts, ignores, ignoreCase, contextLines, regex)
-			// 0 means searcher uses runtime.NumCPU() (existing library default).
-			opts.Workers = workers
-			opts.NoGitignore = noGitignore
+			cfg := cliConfig{
+				keyword:      keyword,
+				root:         root,
+				exts:         exts,
+				ignores:      ignores,
+				ignoreCase:   ignoreCase,
+				contextLines: contextLines,
+				workers:      workers,
+				regex:        regex,
+				noGitignore:  noGitignore,
+			}
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 
-			return run(ctx, opts, cmd.OutOrStdout(), cmd.ErrOrStderr(), noColor, jsonOut, noProgress)
+			return run(ctx, cfg.toSearcherOptions(), cmd.OutOrStdout(), cmd.ErrOrStderr(), noColor, jsonOut, noProgress)
 		},
 	}
 
@@ -105,20 +123,36 @@ Examples:
 	return cmd
 }
 
-// buildOptions turns CLI args/flags into searcher.Options.
-func buildOptions(keyword, root, exts string, ignores []string, ignoreCase bool, contextLines int, regex bool) searcher.Options {
+// cliConfig holds parsed CLI search inputs (args + search-related flags).
+// Output-only flags (noColor, jsonOut, noProgress) stay outside and are passed to run.
+type cliConfig struct {
+	keyword      string
+	root         string
+	exts         string
+	ignores      []string
+	ignoreCase   bool
+	contextLines int
+	workers      int // 0 → searcher uses NumCPU
+	regex        bool
+	noGitignore  bool
+}
+
+// toSearcherOptions maps CLI config into searcher.Options.
+func (c cliConfig) toSearcherOptions() searcher.Options {
 	var skip []string
-	for _, ig := range ignores {
+	for _, ig := range c.ignores {
 		skip = append(skip, parseList(ig)...)
 	}
 	return searcher.Options{
-		Root:         root,
-		Keyword:      keyword,
-		AllowedExts:  parseList(exts),
+		Root:         c.root,
+		Keyword:      c.keyword,
+		AllowedExts:  parseList(c.exts),
 		SkipPatterns: skip,
-		IgnoreCase:   ignoreCase,
-		ContextLines: contextLines,
-		Regex:        regex,
+		IgnoreCase:   c.ignoreCase,
+		ContextLines: c.contextLines,
+		Regex:        c.regex,
+		Workers:      c.workers,
+		NoGitignore:  c.noGitignore,
 	}
 }
 

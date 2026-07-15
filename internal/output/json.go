@@ -33,7 +33,8 @@ func (p *JSONPrinter) WriteMatch(w io.Writer, m searcher.Match) error {
 		Before:  m.Before,
 		After:   m.After,
 	}
-	// Encode without HTML escape so path/content stay literal (Go 1.22+ SetEscapeHTML).
+	// Encode without HTML escape so path/content stay literal.
+	// New encoder per call: Writer may differ between matches; Encode adds '\n'.
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(obj); err != nil {

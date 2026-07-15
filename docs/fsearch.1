@@ -1,0 +1,132 @@
+.\" Man page for fsearch (section 1)
+.TH FSEARCH 1 "July 2026" "fsearch" "User Commands"
+.SH NAME
+fsearch \- fast recursive file content search
+.SH SYNOPSIS
+.B fsearch
+.I keyword
+.RI [ path ]
+.RI [ flags ]
+.SH DESCRIPTION
+.B fsearch
+searches for a keyword inside file contents under a path (recursively,
+including child directories). The default path is the current directory
+.RB ( . ).
+.PP
+Matching is case-sensitive by default; use
+.B \-i
+/
+.B \-\-ignore-case
+to ignore case. With
+.B \-e
+/
+.BR \-\-regex ,
+the keyword is treated as a Go RE2 regular expression.
+.PP
+Output is grep-style
+.RB ( path:line:content ).
+On a TTY, path, line number, and keyword (or regex span) are colored; use
+.B \-\-no-color
+or a pipe to disable. Context lines
+.RB ( \-C )
+coalesce like grep when adjacent or overlapping on the same file.
+.PP
+.B \-\-json
+emits one NDJSON object per match on stdout (no ANSI). Progress (files and
+matches) is shown on stderr when it is a TTY (not with
+.BR \-\-json );
+use
+.B \-\-no-progress
+to disable.
+.PP
+Root
+.B .gitignore
+is loaded when present (root file only; MVP rule subset). Built-in directory
+skips (for example
+.BR .git ,
+.BR node_modules )
+always apply. Unreadable paths are skipped with a warning on stderr.
+.SH OPTIONS
+.TP
+.BI \-C ", " \-\-context " N"
+Print
+.I N
+lines of context before and after each match.
+.TP
+.BI \-\-ext " list"
+Comma-separated file extensions to include (for example
+.BR go,md ).
+Empty means all extensions.
+.TP
+.BR \-h ", " \-\-help
+Show help and exit.
+.TP
+.BI \-\-ignore " pattern"
+Skip basenames matching
+.I pattern
+(exact or glob). Repeatable.
+.TP
+.BR \-i ", " \-\-ignore-case
+Case-insensitive search.
+.TP
+.B \-\-json
+Emit one NDJSON object per match on stdout.
+.TP
+.B \-\-no-color
+Disable colored output.
+.TP
+.B \-\-no-gitignore
+Do not load root
+.BR .gitignore .
+.TP
+.B \-\-no-progress
+Disable the progress indicator on stderr.
+.TP
+.BR \-e ", " \-\-regex
+Treat
+.I keyword
+as a Go RE2 regular expression.
+.TP
+.BI \-\-workers " N"
+Number of concurrent file-search workers.
+.B 0
+means
+.BR NumCPU
+(default).
+.SH EXAMPLES
+.SS Basics
+.EX
+fsearch "TODO" .
+fsearch "TODO" . --ext go,md -C 1 -i
+.EE
+.SS Filter files
+.EX
+fsearch "TODO" . --ext go,md
+fsearch "FIXME" ./internal --ignore vendor
+fsearch "TODO" . --no-gitignore
+.EE
+.SS Match options
+.EX
+fsearch "todo" . -i
+fsearch "TODO" . -C 2
+fsearch 'TODO|FIXME' . -e
+fsearch 'todo' . -e -i
+.EE
+.SS Output & speed
+.EX
+fsearch "TODO" . --no-color
+fsearch "TODO" . --json
+fsearch "TODO" . --no-progress
+fsearch "TODO" . --workers 4
+.EE
+.SH NOTES
+.I keyword
+must be non-empty (whitespace-only is rejected).
+.PP
+The primary supported platform is Linux;
+macOS and Windows builds via Go are best-effort (see the project README).
+.SH SEE ALSO
+Project README (Quick start, install, limitations) and
+.BR fsearch " --help" .
+.SH AUTHOR
+fsearch contributors.

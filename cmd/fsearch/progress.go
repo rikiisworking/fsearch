@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,9 +18,10 @@ type progressWriter struct {
 	files   atomic.Int64
 	matches atomic.Int64
 
-	mu       sync.Mutex
-	lastShow time.Time
-	minGap   time.Duration
+	mu        sync.Mutex
+	lastShow  time.Time
+	minGap    time.Duration
+	lineWidth int // max message width seen; used to pad shorter updates
 }
 
 func newProgressWriter(w io.Writer) *progressWriter {
@@ -61,6 +63,11 @@ func (p *progressWriter) render(force bool) {
 	matches := p.matches.Load()
 	// \r + pad so shorter lines clear leftover chars; final force uses \n.
 	msg := fmt.Sprintf("fsearch: %d files, %d matches", files, matches)
+	if len(msg) > p.lineWidth {
+		p.lineWidth = len(msg)
+	} else if len(msg) < p.lineWidth {
+		msg += strings.Repeat(" ", p.lineWidth-len(msg))
+	}
 	if force {
 		fmt.Fprintf(p.w, "\r%s\n", msg)
 		return

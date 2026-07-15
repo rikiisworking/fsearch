@@ -57,6 +57,31 @@ func TestProgressWriterRateLimit(t *testing.T) {
 	}
 }
 
+func TestProgressWriterPadsShorterLine(t *testing.T) {
+	var buf bytes.Buffer
+	p := newProgressWriter(&buf)
+	p.minGap = 0
+
+	// Establish a wide line, then a shorter one (force width via lineWidth).
+	p.fileDone("a", 1)
+	p.mu.Lock()
+	wide := p.lineWidth
+	p.lineWidth = wide + 10 // pretend a longer message was shown
+	p.mu.Unlock()
+
+	p.finish()
+	got := buf.String()
+	// Final line should be padded to the inflated width before newline.
+	if idx := strings.LastIndex(got, "\r"); idx >= 0 {
+		line := strings.TrimSuffix(got[idx+1:], "\n")
+		if len(line) < wide+10 {
+			t.Errorf("padded line len = %d, want >= %d: %q", len(line), wide+10, line)
+		}
+	} else {
+		t.Errorf("expected \\r in output: %q", got)
+	}
+}
+
 func TestCLISmokeJSONNoProgressOnBuffer(t *testing.T) {
 	// With SetErr to a buffer (non-TTY), progress must stay silent even without --no-progress.
 	// Also --json disables progress regardless of TTY.

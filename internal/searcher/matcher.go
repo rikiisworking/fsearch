@@ -6,11 +6,10 @@ import (
 	"strings"
 )
 
-// matcher decides whether a line is a hit and where spans fall (for highlight).
+// matcher decides whether a line is a hit for the configured keyword/pattern.
+// Highlight spans live in internal/output (separate from search matching).
 type matcher interface {
 	match(line string) bool
-	// findAll returns non-overlapping [start,end) byte spans in line.
-	findAll(line string) [][]int
 }
 
 // newMatcher builds a literal or regex matcher.
@@ -51,48 +50,6 @@ func (m literalMatcher) match(line string) bool {
 	return lineMatch(line, m.keyword, m.ignoreCase)
 }
 
-func (m literalMatcher) findAll(line string) [][]int {
-	if m.keyword == "" {
-		return nil
-	}
-	var spans [][]int
-	if !m.ignoreCase {
-		start := 0
-		for {
-			i := strings.Index(line[start:], m.keyword)
-			if i < 0 {
-				break
-			}
-			abs := start + i
-			end := abs + len(m.keyword)
-			spans = append(spans, []int{abs, end})
-			start = end
-		}
-		return spans
-	}
-
-	// Case-insensitive: search in lowered text when lengths match (common path).
-	lower := strings.ToLower(line)
-	kw := m.keyword // already lower
-	if len(lower) != len(line) {
-		// Length-changing folds: precise multi-span mapping is rare; skip spans
-		// rather than return corrupt byte offsets (match() still works).
-		return nil
-	}
-	start := 0
-	for {
-		i := strings.Index(lower[start:], kw)
-		if i < 0 {
-			break
-		}
-		abs := start + i
-		end := abs + len(kw)
-		spans = append(spans, []int{abs, end})
-		start = end
-	}
-	return spans
-}
-
 // regexMatcher uses a compiled RE2 pattern.
 type regexMatcher struct {
 	re *regexp.Regexp
@@ -102,6 +59,11 @@ func (m regexMatcher) match(line string) bool {
 	return m.re.MatchString(line)
 }
 
-func (m regexMatcher) findAll(line string) [][]int {
-	return m.re.FindAllStringIndex(line, -1)
+// lineMatch reports whether line contains keyword.
+// When ignoreCase is true, keyword must already be lowercased by the caller.
+func lineMatch(line, keyword string, ignoreCase bool) bool {
+	if !ignoreCase {
+		return strings.Contains(line, keyword)
+	}
+	return strings.Contains(strings.ToLower(line), keyword)
 }

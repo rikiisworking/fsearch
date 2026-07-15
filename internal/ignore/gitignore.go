@@ -62,19 +62,15 @@ func normalizeGitPath(path string) string {
 }
 
 // matchFullPath matches pattern against the full relative path, or as a
-// directory prefix (pattern "out" matches "out" and "out/x").
+// directory prefix for literal patterns (pattern "out" matches "out" and "out/x").
+// Glob patterns only match the full path via filepath.Match (MVP: no glob prefix walk).
 func matchFullPath(pattern, path string) bool {
 	if matchName(pattern, path) {
 		return true
 	}
-	// Prefix: each parent path segment chain "a", "a/b" against pattern.
-	// For literal patterns this is pattern+"/"; for globs, try filepath.Match
-	// on successive prefixes only when pattern has no meta... keep simple:
-	if strings.HasPrefix(path, pattern+"/") {
-		// Only safe when pattern has no glob metacharacters.
-		if !strings.ContainsAny(pattern, "*?[]") {
-			return true
-		}
+	// Literal directory prefix only (unsafe for globs like "out*").
+	if !strings.ContainsAny(pattern, "*?[]") && strings.HasPrefix(path, pattern+"/") {
+		return true
 	}
 	return false
 }
@@ -94,14 +90,6 @@ func NewGitignore(rules []Rule) *Gitignore {
 	// Copy so callers cannot mutate our slice unexpectedly.
 	cp := append([]Rule(nil), rules...)
 	return &Gitignore{rules: cp}
-}
-
-// Rules returns a copy of the underlying rules.
-func (g *Gitignore) Rules() []Rule {
-	if g == nil {
-		return nil
-	}
-	return append([]Rule(nil), g.rules...)
 }
 
 // Match reports whether path should be ignored under gitignore last-match-wins

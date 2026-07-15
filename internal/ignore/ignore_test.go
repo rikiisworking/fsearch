@@ -74,6 +74,12 @@ func TestSkipDirPatterns(t *testing.T) {
 			}
 		})
 	}
+
+	// Whitespace-only and padded patterns are normalized in New.
+	mPad := New(nil, []string{"  build  ", "", "  "})
+	if !mPad.SkipDir("x/build", "build") {
+		t.Error("trimmed skip pattern \"build\" should match")
+	}
 }
 
 func TestIncludeFile(t *testing.T) {

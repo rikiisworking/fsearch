@@ -6,8 +6,9 @@ PKG    := ./cmd/fsearch
 build:
 	go build -o $(BINARY) $(PKG)
 
+# Installs to ~/.local/bin and ensures that dir is on PATH (see scripts/install.sh).
 install:
-	go install $(PKG)
+	PKG=$(PKG) ./scripts/install.sh
 
 test:
 	go test ./... -v

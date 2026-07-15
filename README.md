@@ -53,8 +53,18 @@ fsearch --help
 
 ```bash
 make install
-# or
-go install ./cmd/fsearch
+```
+
+`make install` runs [`scripts/install.sh`](scripts/install.sh), which:
+
+1. builds `fsearch` into `~/.local/bin/fsearch`
+2. if `~/.local/bin` is not already on your `PATH`, adds it once to `~/.bashrc`
+
+If the script asks you to reload the shell:
+
+```bash
+source ~/.bashrc
+fsearch --help
 ```
 
 ### Copy a built binary
@@ -62,8 +72,8 @@ go install ./cmd/fsearch
 ```bash
 make build
 sudo cp bin/fsearch /usr/local/bin/
-# or without sudo, e.g. ~/bin if that directory is on PATH
-cp bin/fsearch ~/bin/
+# or without sudo (same layout as make install):
+cp bin/fsearch ~/.local/bin/
 ```
 
 ## Usage

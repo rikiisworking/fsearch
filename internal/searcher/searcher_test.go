@@ -3,6 +3,7 @@ package searcher
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -354,11 +355,11 @@ func TestSearchNoGitignore(t *testing.T) {
 	mustWrite(t, filepath.Join(root, "noise.skip"), "package noise\n// TODO skip-file\n")
 
 	got, err := collectSearch(context.Background(), Options{
-		Root:         root,
-		Keyword:      "TODO",
-		AllowedExts:  []string{"go", "skip"},
-		Workers:      1,
-		NoGitignore:  true,
+		Root:        root,
+		Keyword:     "TODO",
+		AllowedExts: []string{"go", "skip"},
+		Workers:     1,
+		NoGitignore: true,
 	})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
@@ -578,5 +579,367 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Errorf("WriteFile: %v", err)
+	}
+}
+
+func TestSearchFileRegex(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	content := "TODO first\nFIXME second\nnote only\nTODO again\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	matches, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword: `TODO|FIXME`,
+		Regex:   true,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(matches) != 3 {
+		t.Fatalf("got %d matches, want 3: %+v", len(matches), matches)
+	}
+	if matches[0].Line != 1 || matches[1].Line != 2 || matches[2].Line != 4 {
+		t.Errorf("lines = %d,%d,%d want 1,2,4", matches[0].Line, matches[1].Line, matches[2].Line)
+	}
+}
+
+func TestSearchFileRegexIgnoreCase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	if err := os.WriteFile(path, []byte("todo one\nTODO two\nToDo three\nnope\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// Case-sensitive regex: only exact TODO
+	got, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword: `TODO`,
+		Regex:   true,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(got) != 1 || got[0].Line != 2 {
+		t.Errorf("case-sensitive regex: got %+v, want 1 hit on line 2", got)
+	}
+
+	// Ignore-case regex
+	got, err = SearchFile(context.Background(), path, FileOptions{
+		Keyword:    `todo`,
+		Regex:      true,
+		IgnoreCase: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(got) != 3 {
+		t.Errorf("ignore-case regex: got %d hits, want 3: %+v", len(got), got)
+	}
+}
+
+func TestSearchFileRegexContext(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sample.txt")
+	// lines: 1=alpha, 2=beta, 3=HIT one, 4=gamma, 5=HIT two, 6=delta
+	content := "alpha\nbeta\nHIT one\ngamma\nHIT two\ndelta\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	matches, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword:      `HIT\s+\w+`,
+		Regex:        true,
+		ContextLines: 1,
+	})
+	if err != nil {
+		t.Fatalf("SearchFile: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("got %d matches, want 2: %+v", len(matches), matches)
+	}
+	if matches[0].Line != 3 || matches[0].Content != "HIT one" {
+		t.Errorf("match0 = %+v", matches[0])
+	}
+	if !equalStrings(matches[0].Before, []string{"beta"}) {
+		t.Errorf("match0.Before = %v, want [beta]", matches[0].Before)
+	}
+	if !equalStrings(matches[0].After, []string{"gamma"}) {
+		t.Errorf("match0.After = %v, want [gamma]", matches[0].After)
+	}
+}
+
+func TestSearchFileInvalidRegex(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.txt")
+	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := SearchFile(context.Background(), path, FileOptions{
+		Keyword: `[`,
+		Regex:   true,
+	})
+	if err == nil {
+		t.Fatal("expected invalid regex error")
+	}
+	if !strings.Contains(err.Error(), "invalid regex") {
+		t.Errorf("error = %q, want it to mention invalid regex", err)
+	}
+}
+
+func TestSearchInvalidRegex(t *testing.T) {
+	// Fail before walk: bad pattern should not need a real tree of files.
+	err := Search(context.Background(), Options{
+		Root:    t.TempDir(),
+		Keyword: `[`,
+		Regex:   true,
+	}, make(chan Match, 1))
+	if err == nil {
+		t.Fatal("expected invalid regex error")
+	}
+	if !strings.Contains(err.Error(), "invalid regex") {
+		t.Errorf("error = %q, want it to mention invalid regex", err)
+	}
+}
+
+func TestSearchRegex(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.go"), "package a\n// TODO here\n")
+	mustWrite(t, filepath.Join(root, "b.go"), "package b\n// FIXME there\n")
+	mustWrite(t, filepath.Join(root, "c.go"), "package c\n// note only\n")
+
+	got, err := collectSearch(context.Background(), Options{
+		Root:        root,
+		Keyword:     `TODO|FIXME`,
+		Regex:       true,
+		AllowedExts: []string{"go"},
+		Workers:     2,
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d matches, want 2: %+v", len(got), got)
+	}
+}
+
+func TestNewMatcherLiteralFindAll(t *testing.T) {
+	m, err := newMatcher("ab", false, false)
+	if err != nil {
+		t.Fatalf("newMatcher: %v", err)
+	}
+	got := m.findAll("xxabyyabzz")
+	want := [][]int{{2, 4}, {6, 8}}
+	if len(got) != len(want) {
+		t.Fatalf("findAll = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i][0] != want[i][0] || got[i][1] != want[i][1] {
+			t.Errorf("span %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestNewMatcherRegexFindAll(t *testing.T) {
+	m, err := newMatcher(`a+`, false, true)
+	if err != nil {
+		t.Fatalf("newMatcher: %v", err)
+	}
+	got := m.findAll("xaaay")
+	if len(got) != 1 || got[0][0] != 1 || got[0][1] != 4 {
+		t.Errorf("findAll = %v, want [[1 4]]", got)
+	}
+}
+
+func TestSearchOnFileDone(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "a.go"), "package a\n// TODO one\n// TODO two\n")
+	mustWrite(t, filepath.Join(root, "b.go"), "package b\n// no hit\n")
+	mustWrite(t, filepath.Join(root, "c.md"), "# TODO md\n") // filtered by ext
+
+	var (
+		mu    sync.Mutex
+		files []string
+		total int
+	)
+	got, err := collectSearch(context.Background(), Options{
+		Root:        root,
+		Keyword:     "TODO",
+		AllowedExts: []string{"go"},
+		Workers:     2,
+		OnFileDone: func(path string, matchCount int) {
+			mu.Lock()
+			files = append(files, filepath.Base(path))
+			total += matchCount
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("hits = %d, want 2", len(got))
+	}
+	if total != 2 {
+		t.Errorf("OnFileDone total matchCount = %d, want 2", total)
+	}
+	// a.go and b.go only (c.md filtered by walker, never reaches workers).
+	if len(files) != 2 {
+		t.Fatalf("OnFileDone files = %v, want 2", files)
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		seen[f] = true
+	}
+	if !seen["a.go"] || !seen["b.go"] {
+		t.Errorf("OnFileDone files = %v, want a.go and b.go", files)
+	}
+}
+
+func TestSearchOnFileDoneAfterIOError(t *testing.T) {
+	// Per-file open failure should call OnFileDone(path, 0) so progress still advances.
+	root := t.TempDir()
+	good := filepath.Join(root, "good.go")
+	bad := filepath.Join(root, "bad.go")
+	mustWrite(t, good, "package good\n// TODO ok\n")
+	mustWrite(t, bad, "package bad\n// TODO hidden by perms\n")
+
+	if err := os.Chmod(bad, 0); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(bad, 0o644) })
+
+	if f, err := os.Open(bad); err == nil {
+		f.Close()
+		t.Skip("unreadable file still openable (root?); skip OnFileDone I/O test")
+	}
+
+	var (
+		mu       sync.Mutex
+		done     = map[string]int{}
+		errPaths []string
+	)
+	got, err := collectSearch(context.Background(), Options{
+		Root:    root,
+		Keyword: "TODO",
+		Workers: 2,
+		OnError: func(path string, err error) {
+			mu.Lock()
+			errPaths = append(errPaths, path)
+			mu.Unlock()
+		},
+		OnFileDone: func(path string, matchCount int) {
+			mu.Lock()
+			done[path] = matchCount
+			mu.Unlock()
+		},
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if len(errPaths) != 1 || errPaths[0] != bad {
+		t.Errorf("OnError paths = %v, want [%q]", errPaths, bad)
+	}
+	if n, ok := done[bad]; !ok || n != 0 {
+		t.Errorf("OnFileDone for bad file = (%v, %d), want (present, 0)", ok, n)
+	}
+	if n, ok := done[good]; !ok || n != 1 {
+		t.Errorf("OnFileDone for good file = (%v, %d), want (present, 1)", ok, n)
+	}
+	if len(got) != 1 || got[0].Content != "// TODO ok" {
+		t.Errorf("hits = %v, want one good hit", got)
+	}
+}
+
+func TestSearchSameFileMatchesContiguous(t *testing.T) {
+	// Matches from one file must be delivered contiguously (line order) even
+	// with multiple workers, so consumers can coalesce context blocks.
+	root := t.TempDir()
+	const nFiles = 8
+	const hitsPerFile = 5
+	for i := 0; i < nFiles; i++ {
+		var b strings.Builder
+		b.WriteString("package p\n")
+		for h := 0; h < hitsPerFile; h++ {
+			b.WriteString("// TODO hit\n")
+			b.WriteString("// filler\n")
+		}
+		mustWrite(t, filepath.Join(root, fmt.Sprintf("f%d.go", i)), b.String())
+	}
+
+	// Collect in arrival order (do not sort).
+	results := make(chan Match, 64)
+	var got []Match
+	g, ctx := errgroup.WithContext(context.Background())
+	g.Go(func() error {
+		defer close(results)
+		return Search(ctx, Options{
+			Root:        root,
+			Keyword:     "TODO",
+			AllowedExts: []string{"go"},
+			Workers:     4,
+		}, results)
+	})
+	g.Go(func() error {
+		for m := range results {
+			got = append(got, m)
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != nFiles*hitsPerFile {
+		t.Fatalf("got %d hits, want %d", len(got), nFiles*hitsPerFile)
+	}
+
+	// Within each contiguous run of the same path, line numbers must be strictly
+	// increasing and the run length must equal hitsPerFile (no interleaving).
+	i := 0
+	for i < len(got) {
+		path := got[i].Path
+		start := i
+		lastLine := 0
+		for i < len(got) && got[i].Path == path {
+			if got[i].Line <= lastLine {
+				t.Errorf("path %s: non-increasing lines at index %d: %d then %d",
+					path, i, lastLine, got[i].Line)
+			}
+			lastLine = got[i].Line
+			i++
+		}
+		run := i - start
+		if run != hitsPerFile {
+			t.Errorf("path %s: contiguous run length %d, want %d (interleaved?)", path, run, hitsPerFile)
+		}
+	}
+}
+
+func TestNewMatcherLiteralFindAllIgnoreCase(t *testing.T) {
+	m, err := newMatcher("TODO", true, false)
+	if err != nil {
+		t.Fatalf("newMatcher: %v", err)
+	}
+	// Spans must cover original casing in the source line.
+	got := m.findAll("xx todo yy ToDo zz TODO")
+	want := [][]int{
+		{3, 7},   // "todo"
+		{11, 15}, // "ToDo"
+		{19, 23}, // "TODO"
+	}
+	if len(got) != len(want) {
+		t.Fatalf("findAll = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i][0] != want[i][0] || got[i][1] != want[i][1] {
+			t.Errorf("span %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+	// Empty keyword path is rejected by newMatcher; empty findAll keyword
+	// branch is defensive. No-match returns nil/empty.
+	if spans := m.findAll("nothing here"); len(spans) != 0 {
+		t.Errorf("no match findAll = %v, want empty", spans)
 	}
 }

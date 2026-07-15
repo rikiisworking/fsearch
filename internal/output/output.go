@@ -4,6 +4,7 @@ package output
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -14,7 +15,9 @@ import (
 )
 
 // Printer formats Match values for the terminal.
-// Keyword and IgnoreCase drive hit-line keyword highlighting.
+// Keyword and IgnoreCase drive hit-line keyword highlighting in literal mode.
+// When Regex is non-nil, hit-line spans come from that pattern instead
+// (IgnoreCase should already be baked into the compiled expression, e.g. (?i)).
 // NoColor forces plain text; otherwise colors follow TTY / NO_COLOR via fatih/color.
 //
 // When matches include context, overlapping or adjacent blocks on the same path
@@ -25,6 +28,9 @@ type Printer struct {
 	Keyword    string
 	IgnoreCase bool
 	NoColor    bool
+	// Regex, when non-nil, highlights matches of this pattern on hit lines
+	// instead of literal Keyword/IgnoreCase.
+	Regex *regexp.Regexp
 
 	// groupsWritten counts flushed context groups / plain hits (for "--").
 	groupsWritten int
@@ -204,10 +210,16 @@ func (p *Printer) colorLine(lineNo int, isContext bool) string {
 	return c.Sprint(s)
 }
 
-// highlightContent wraps keyword occurrences in bold red when color is enabled.
-// When color is off or keyword is empty, returns content unchanged.
+// highlightContent wraps keyword/regex occurrences in bold red when color is enabled.
+// When color is off, returns content unchanged.
 func (p *Printer) highlightContent(content string) string {
-	return highlight(content, p.Keyword, p.IgnoreCase, p.useColor())
+	if p == nil || !p.useColor() {
+		return content
+	}
+	if p.Regex != nil {
+		return highlightSpans(content, p.Regex.FindAllStringIndex(content, -1))
+	}
+	return highlight(content, p.Keyword, p.IgnoreCase, true)
 }
 
 // highlight returns content with each non-overlapping keyword occurrence wrapped
@@ -219,23 +231,49 @@ func highlight(content, keyword string, ignoreCase, enabled bool) string {
 		return content
 	}
 
-	var b strings.Builder
+	var spans [][]int
 	rest := content
-	// EnableColor on this instance so highlight works even when the
-	// global color.NoColor is true (caller already gated with enabled).
-	c := color.New(color.FgRed, color.Bold)
-	c.EnableColor()
-
+	offset := 0
 	for rest != "" {
 		start, end, ok := indexKeyword(rest, keyword, ignoreCase)
 		if !ok {
-			b.WriteString(rest)
 			break
 		}
-		b.WriteString(rest[:start])
-		b.WriteString(c.Sprint(rest[start:end]))
+		spans = append(spans, []int{offset + start, offset + end})
 		rest = rest[end:]
+		offset += end
 	}
+	return highlightSpans(content, spans)
+}
+
+// highlightSpans wraps each [start,end) span of content in bold red ANSI codes.
+// Spans must be non-overlapping and sorted by start (as from FindAllStringIndex
+// or sequential literal search). Empty or invalid spans are skipped.
+func highlightSpans(content string, spans [][]int) string {
+	if len(spans) == 0 {
+		return content
+	}
+
+	// EnableColor on this instance so highlight works even when the
+	// global color.NoColor is true (caller already gated with useColor).
+	c := color.New(color.FgRed, color.Bold)
+	c.EnableColor()
+
+	var b strings.Builder
+	pos := 0
+	for _, sp := range spans {
+		if len(sp) < 2 {
+			continue
+		}
+		start, end := sp[0], sp[1]
+		if start < pos || end > len(content) || start >= end {
+			continue
+		}
+		b.WriteString(content[pos:start])
+		b.WriteString(c.Sprint(content[start:end]))
+		pos = end
+	}
+	b.WriteString(content[pos:])
 	return b.String()
 }
 

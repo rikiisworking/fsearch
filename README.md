@@ -4,7 +4,7 @@ Fast recursive file content search for the Linux shell.
 
 Modern, concurrent alternative to classic `grep` / `find` combos.
 
-> **Status:** Sprint 3 — `.gitignore`, `--workers`, benchmarks, walk skip warnings.
+> **Status:** Sprint 4 — JSON output, regex (`-e`), progress indicator, install docs.
 
 ## Requirements
 
@@ -19,12 +19,40 @@ make build
 go build -o bin/fsearch ./cmd/fsearch
 ```
 
-## Install
+## Install (Linux)
+
+### From module (no clone)
+
+```bash
+go install github.com/nick/fsearch/cmd/fsearch@latest
+```
+
+Ensure the install directory is on your `PATH`:
+
+```bash
+# Default install location is $(go env GOPATH)/bin, unless GOBIN is set
+export PATH="$(go env GOPATH)/bin:$PATH"
+# or, if you set GOBIN:
+# export PATH="$(go env GOBIN):$PATH"
+
+fsearch --help
+```
+
+### From a local clone
 
 ```bash
 make install
 # or
 go install ./cmd/fsearch
+```
+
+### Copy a built binary
+
+```bash
+make build
+sudo cp bin/fsearch /usr/local/bin/
+# or without sudo, e.g. ~/bin if that directory is on PATH
+cp bin/fsearch ~/bin/
 ```
 
 ## Usage
@@ -58,6 +86,17 @@ fsearch --help
 
 # Limit concurrent file-search workers (0 = NumCPU)
 ./bin/fsearch "TODO" . --workers 4
+
+# Regex (Go RE2); combine with -i for case-insensitive patterns
+./bin/fsearch 'TODO|FIXME' . --ext go -e
+./bin/fsearch 'todo' . -e -i
+
+# NDJSON (one JSON object per match; good for pipes / jq)
+./bin/fsearch "TODO" . --ext go --json
+./bin/fsearch "TODO" . --ext go -C 1 --json
+
+# Disable stderr progress (also off when stderr is not a TTY or with --json)
+./bin/fsearch "TODO" . --no-progress
 ```
 
 Root `.gitignore` is loaded automatically when present (root file only; MVP rule subset — see [Known limitations](#known-limitations)).
@@ -79,7 +118,23 @@ path:line:next hit
 Overlapping or adjacent context groups on the same file are coalesced (no
 duplicate lines, no mid-group `--`), like grep.
 
-On a TTY, path is magenta, line numbers green, and the keyword bold red on hit lines. Colors are off when piped, when `NO_COLOR` is set, or with `--no-color`.
+On a TTY, path is magenta, line numbers green, and the keyword (or regex span)
+is bold red on hit lines. Colors are off when piped, when `NO_COLOR` is set, or
+with `--no-color`.
+
+**JSON (`--json`):** one NDJSON object per match on stdout (no ANSI, no `--`
+coalescing). Shape:
+
+```json
+{"path":"main.go","line":3,"content":"// TODO here"}
+{"path":"a.txt","line":2,"content":"HIT","before":["before"],"after":["after"]}
+```
+
+`before` / `after` are omitted when empty. Context from `-C` is still included
+on each object when present.
+
+**Progress:** when stderr is a TTY (and not `--json` / `--no-progress`), a
+updating line shows file and match counts, e.g. `fsearch: 128 files, 4 matches`.
 
 Unreadable paths during walk or file open are skipped; a warning goes to stderr
 (`fsearch: skip <path>: …`) and the search continues.
@@ -90,9 +145,12 @@ Unreadable paths during walk or file open are skipped; a warning goes to stderr
 | `--ignore PAT` | skip basenames matching PAT (exact or glob; repeatable) |
 | `-i`, `--ignore-case` | case-insensitive search (default: case-sensitive) |
 | `-C`, `--context N` | N lines of context before and after each match |
+| `-e`, `--regex` | treat keyword as a Go RE2 regular expression |
+| `--json` | emit one NDJSON object per match on stdout |
 | `--workers N` | concurrent file-search workers (`0` = `NumCPU`, default) |
 | `--no-gitignore` | do not load root `.gitignore` |
 | `--no-color` | disable colored output |
+| `--no-progress` | disable progress indicator on stderr |
 
 ### Known limitations
 
@@ -118,14 +176,14 @@ Sample run (`make bench`, Go test `-benchmem -benchtime=1s` on linux/amd64, Inte
 
 | Benchmark | ns/op | B/op | allocs/op |
 |-----------|------:|-----:|----------:|
-| `BenchmarkSearch` | ~1.55ms | ~3.6 MiB | ~10.7k |
-| `BenchmarkSearchWithContext` (`-C 1`) | ~2.03ms | ~4.1 MiB | ~12.0k |
+| `BenchmarkSearch` | ~1.84ms | ~3.6 MiB | ~10.7k |
+| `BenchmarkSearchWithContext` (`-C 1`) | ~2.43ms | ~4.1 MiB | ~12.0k |
 
 Numbers vary by CPU, GOMAXPROCS, and load. Re-run with `make bench` for local results. Raw example:
 
 ```text
-BenchmarkSearch-12                 687   1545096 ns/op  3619564 B/op  10663 allocs/op
-BenchmarkSearchWithContext-12      574   2028908 ns/op  4100741 B/op  11963 allocs/op
+BenchmarkSearch-12                 739   1837607 ns/op  3621331 B/op  10717 allocs/op
+BenchmarkSearchWithContext-12      445   2426592 ns/op  4102694 B/op  12017 allocs/op
 ```
 
 ## Project structure
@@ -138,7 +196,7 @@ fsearch/
 │   ├── searcher/            # Orchestrates walk + concurrent file matching
 │   ├── walker/              # filepath.WalkDir → file path channel
 │   ├── ignore/              # Extension allow-list + basename skip rules
-│   └── output/              # Grep-style + colored formatting
+│   └── output/              # Grep-style, colors, NDJSON
 ├── bin/                     # Built binary (make build)
 ├── Makefile
 ├── go.mod / go.sum
@@ -150,10 +208,10 @@ fsearch/
 | Package | Role |
 |---------|------|
 | `cmd/fsearch` | Parses CLI args/flags, wires options, streams matches to stdout |
-| `internal/searcher` | Coordinates workers; opens files and finds keyword hits by line |
+| `internal/searcher` | Coordinates workers; opens files and finds keyword/regex hits by line |
 | `internal/walker` | Walks the tree (skips symlinks); yields regular file paths |
 | `internal/ignore` | Default dir skips (`.git`, `node_modules`, …) + `--ext` / `--ignore` |
-| `internal/output` | Formats hits (context, colors, keyword highlight) |
+| `internal/output` | Formats hits (context, colors, regex highlight, NDJSON) |
 
 ### Architecture
 

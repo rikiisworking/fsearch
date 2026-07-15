@@ -2,6 +2,7 @@ package output
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -419,5 +420,107 @@ func TestPrinterHighlightOnlyOnHitLine(t *testing.T) {
 	// Plain text still present in context.
 	if !strings.Contains(got, "before HIT") || !strings.Contains(got, "after HIT") {
 		t.Errorf("context plain keyword missing: %q", got)
+	}
+}
+
+func TestHighlightRegex(t *testing.T) {
+	paint := func(s string) string {
+		c := color.New(color.FgRed, color.Bold)
+		c.EnableColor()
+		return c.Sprint(s)
+	}
+
+	re := regexp.MustCompile(`TODO|FIXME`)
+	p := &Printer{Regex: re, NoColor: false}
+	// Force color path even if global NoColor is true.
+	old := color.NoColor
+	color.NoColor = false
+	t.Cleanup(func() { color.NoColor = old })
+
+	got := p.highlightContent("xx TODO yy FIXME zz")
+	want := "xx " + paint("TODO") + " yy " + paint("FIXME") + " zz"
+	if got != want {
+		t.Errorf("highlightContent regex = %q, want %q", got, want)
+	}
+
+	// NoColor must leave content plain even with Regex set.
+	p.NoColor = true
+	if got := p.highlightContent("TODO"); got != "TODO" {
+		t.Errorf("NoColor with Regex = %q, want plain TODO", got)
+	}
+}
+
+func TestHighlightRegexIgnoreCase(t *testing.T) {
+	paint := func(s string) string {
+		c := color.New(color.FgRed, color.Bold)
+		c.EnableColor()
+		return c.Sprint(s)
+	}
+
+	// Case-insensitivity is baked into the compiled pattern (same as searcher).
+	re := regexp.MustCompile(`(?i)todo`)
+	p := &Printer{Regex: re, NoColor: false}
+	old := color.NoColor
+	color.NoColor = false
+	t.Cleanup(func() { color.NoColor = old })
+
+	got := p.highlightContent("todo ToDo TODO")
+	want := paint("todo") + " " + paint("ToDo") + " " + paint("TODO")
+	if got != want {
+		t.Errorf("highlightContent ignore-case regex = %q, want %q", got, want)
+	}
+}
+
+func TestPrinterRegexHighlightOnlyOnHitLine(t *testing.T) {
+	re := regexp.MustCompile(`HIT`)
+	p := &Printer{Regex: re, NoColor: false}
+	old := color.NoColor
+	color.NoColor = false
+	t.Cleanup(func() { color.NoColor = old })
+
+	var buf bytes.Buffer
+	m := searcher.Match{
+		Path:    "a.txt",
+		Line:    2,
+		Content: "HIT mid",
+		Before:  []string{"before HIT"},
+		After:   []string{"after HIT"},
+	}
+	if err := p.WriteMatch(&buf, m); err != nil {
+		t.Fatalf("WriteMatch: %v", err)
+	}
+	if err := p.Flush(&buf); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	got := buf.String()
+
+	painted := func(s string) string {
+		c := color.New(color.FgRed, color.Bold)
+		c.EnableColor()
+		return c.Sprint(s)
+	}("HIT")
+
+	if !strings.Contains(got, painted+" mid") {
+		t.Errorf("hit line missing regex highlight: %q", got)
+	}
+	if strings.Contains(got, "before "+painted) || strings.Contains(got, "after "+painted) {
+		t.Errorf("context lines should not regex-highlight: %q", got)
+	}
+}
+
+func TestHighlightSpans(t *testing.T) {
+	paint := func(s string) string {
+		c := color.New(color.FgRed, color.Bold)
+		c.EnableColor()
+		return c.Sprint(s)
+	}
+
+	got := highlightSpans("abcdef", [][]int{{1, 3}, {4, 5}})
+	want := "a" + paint("bc") + "d" + paint("e") + "f"
+	if got != want {
+		t.Errorf("highlightSpans = %q, want %q", got, want)
+	}
+	if highlightSpans("abc", nil) != "abc" {
+		t.Errorf("empty spans should return content")
 	}
 }
